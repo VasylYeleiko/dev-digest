@@ -159,7 +159,7 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
 
   it('runs a review: map-reduce + grounding drops the hallucinated finding, keeps the valid one', async () => {
     const app = await appWith(REVIEW_FIXTURE);
-    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+    const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
 
     const agent = (
       await app.inject({
@@ -208,6 +208,22 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     expect(run!.status).toBe('done');
     expect(run!.findingsCount).toBe(1);
     expect(run!.grounding).toBe('1/2 passed');
+
+    // Cost is READ off the engine outcome and persisted — never recomputed.
+    // MockLLMProvider bills 0.001 per structured call, so the exact total
+    // depends on the chunk count; what matters is that a real value survives
+    // the write and comes back identically on every read path.
+    const costUsd = run!.costUsd;
+    expect(costUsd).not.toBeNull();
+    expect(costUsd).toBeGreaterThan(0);
+    expect(trace.stats.cost_usd).toBe(costUsd);
+
+    const runs = (await app.inject({ method: 'GET', url: `/pulls/${pr.id}/runs` })).json();
+    expect(runs[0].cost_usd).toBe(costUsd);
+
+    // PR-list rollup: this single run IS the latest review batch.
+    const pulls = (await app.inject({ method: 'GET', url: `/repos/${repo.id}/pulls` })).json();
+    expect(pulls.find((p: { id: string }) => p.id === pr.id).cost_usd).toBe(costUsd);
 
     await app.close();
   });

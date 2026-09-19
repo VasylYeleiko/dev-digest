@@ -129,6 +129,47 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
       }
     }
 
+    // Latest-review-batch COST per PR for the list's COST column. "Review all"
+    // fans out N agents within seconds, so one number for the PR must be the
+    // sum of that fan-out, not a single agent's slice. There's no batch id in
+    // the schema — the newest priced run per PR anchors a window, and runs
+    // within BATCH_WINDOW_MS of it join the same batch. Swap this for exact
+    // grouping if a review-session id is ever added. Same on-read IN-query +
+    // JS grouping as the score block above.
+    const BATCH_WINDOW_MS = 120_000;
+    const costByPr = new Map<string, number>();
+    if (prIds.length > 0) {
+      const runRows = await container.db
+        .select({
+          prId: t.agentRuns.prId,
+          ranAt: t.agentRuns.ranAt,
+          costUsd: t.agentRuns.costUsd,
+        })
+        .from(t.agentRuns)
+        .where(
+          and(
+            eq(t.agentRuns.workspaceId, workspaceId),
+            inArray(t.agentRuns.prId, prIds),
+            eq(t.agentRuns.status, 'done'),
+          ),
+        )
+        .orderBy(desc(t.agentRuns.ranAt));
+      // Rows newest-first. The first priced run seen per PR anchors the batch
+      // window's upper bound; later runs add in while within the window of it.
+      const batchEndByPr = new Map<string, number>();
+      for (const run of runRows) {
+        if (!run.prId || run.costUsd == null) continue;
+        const ts = run.ranAt ? run.ranAt.getTime() : 0;
+        const end = batchEndByPr.get(run.prId);
+        if (end === undefined) {
+          batchEndByPr.set(run.prId, ts);
+          costByPr.set(run.prId, run.costUsd);
+        } else if (ts >= end - BATCH_WINDOW_MS) {
+          costByPr.set(run.prId, (costByPr.get(run.prId) ?? 0) + run.costUsd);
+        }
+      }
+    }
+
     const now = Date.now();
     return rows.map((r) => {
       const review = latestReviewByPr.get(r.id);
@@ -153,6 +194,7 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         opened_at: r.openedAt?.toISOString() ?? null,
         updated_at: r.updatedAt?.toISOString() ?? null,
         score: review ? review.score : null,
+        cost_usd: costByPr.has(r.id) ? costByPr.get(r.id)! : null,
       };
     });
   });

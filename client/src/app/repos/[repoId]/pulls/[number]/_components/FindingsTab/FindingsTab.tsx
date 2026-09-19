@@ -158,6 +158,9 @@ export function FindingsTab({
           <ReviewRunAccordion
             key={review.id}
             review={review}
+            // `runs` here are REVIEWS; the agent run carrying cost/tokens lives
+            // in `prRuns`, matched by run_id (null when the run was deleted).
+            run={prRuns?.find((r) => r.run_id === review.run_id) ?? null}
             prId={prId}
             defaultOpen={i === 0}
             repoFullName={repoFullName}
