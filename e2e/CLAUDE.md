@@ -30,6 +30,18 @@ commands run in order by `src/lib`'s runner. `{BASE}` in a spec resolves to
   time out and exit non-zero if the condition never holds; there's no
   separate assertion API beyond the optional `"assert": { "stdoutIncludes" }`.
 
+## Naming conventions
+
+- **`specs/NN-name.flow.json`** — two-digit prefix is run order, not
+  precedence; `name` is a short kebab-case description of the journey covered
+  (`02-repo-pulls-detail`, `04-pr-findings`). One flow per file.
+- Each step is `{ "cmd": [...], "label": "..." }` — `label` is a short
+  imperative sentence describing what the step proves, read by a human
+  scanning a failed run, not by the runner.
+- Locator commands are always `find <role|text|label> <value> click` — never a
+  raw CSS/XPath selector, so a flow keeps working across markup refactors as
+  long as the visible text/role/label is stable.
+
 ## Gotchas
 
 - ⚠️ **Never `docker compose down -v`** to "reset" a dev DB — it deletes the
@@ -42,9 +54,11 @@ commands run in order by `src/lib`'s runner. `{BASE}` in a spec resolves to
 
 - Don't hand-edit `specs/*.flow.json` — author flows as command lists per
   the README's format, keeping locators deterministic (no AI `chat` steps).
+- `package-lock.json` — regenerate via `npm install`, never hand-edit.
 
-## More
+## Read When
 
-[specs/](specs/) ·
-[INSIGHTS.md](INSIGHTS.md) — read before working in this package ·
-[TESTING.md](../TESTING.md)
+- Adding a new flow or changing the runner → [docs/flow-runner.md](docs/flow-runner.md)
+- Writing/editing a `.flow.json` file → [specs/flow-format.md](specs/flow-format.md)
+- Anything in this package → [INSIGHTS.md](INSIGHTS.md) first,
+  [TESTING.md](../TESTING.md) before writing a test

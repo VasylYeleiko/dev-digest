@@ -27,6 +27,23 @@ instead of the manual slash search. Evidence: `test/indexer-pipeline.test.ts:140
 
 ## Codebase Patterns
 
+### 2026-09-20 — `SimpleGitClient.fetchPullHead()` existed, fully implemented, and had ZERO callers
+
+A shallow clone (`CLONE_DEPTH=1`, `simple-git.ts`'s `clone()`) only ever
+tracks the default branch, so an open PR's head commit is never locally
+reachable — `git diff base...head` throws "unknown revision" for
+essentially every real (non-merged) PR reviewed. `fetchPullHead()` exists
+specifically to fix this (fetches GitHub's `pull/<n>/head`), is fully
+implemented, and even has a mock in `adapters/mocks.ts` — but before this
+session nothing called it anywhere in the codebase (confirmed by a
+repo-wide grep). The symptom was silent and confusing: `loadDiff`'s
+try/catch swallowed the throw and fell through to a DB-reconstructed diff
+that was *also* usually empty, so every agent "reviewed" an empty diff and
+correctly said "approve, nothing to review" — never an error, never a hint
+what went wrong. Grep for zero callers on anything that "exists to solve
+exactly this problem" before assuming the problem is unsolved. Evidence:
+`src/modules/reviews/diff-loader.ts` (now calls it), `src/adapters/git/simple-git.ts:72-75`.
+
 ### 2026-09-18 — `@devdigest/shared` is TWO hand-mirrored copies, not a package
 
 `CLAUDE.md` lists `src/vendor/shared` under "Do not touch — edit the source
@@ -39,7 +56,47 @@ editing both in lock-step or the client silently loses the field. Verify with
 
 ## Tool & Library Notes
 
+### 2026-09-20 — testing `container.ts`'s `buildLlm` DI wiring can't use the normal `overrides.llm` test pattern
+
+`Container.llm(id)` checks `overrides.llm?.[id]` FIRST and returns it
+immediately if set (`platform/container.ts`), which is exactly why every
+existing integration test injects a `MockLLMProvider` that way — but it
+also means those tests never execute `buildLlm` itself, so they can't catch
+a regression in what `buildLlm` passes into a real provider's constructor.
+To test `buildLlm`'s wiring, either `vi.mock` the concrete adapter modules
+(`adapters/llm/openai.js`/`anthropic.js`) and construct a bare `Container`
+directly, or accept you're only testing the mock's own behavior. If you do
+construct a bare `Container` with a stub `SecretsProvider` that returns a
+truthy value for any key, make `OPENROUTER_API_KEY` explicitly return
+`undefined` — `container.priceBook`'s lazy refresh treats *any* truthy
+OpenRouter key as "try a real network call" (wrapped in try/catch, so it
+won't throw, but it will actually attempt one and make the test slow/flaky).
+Evidence: `test/container-llm.test.ts`, `src/platform/container.ts:140-151`.
+
 ## Decisions
+
+### 2026-09-20 — `seed.ts`'s demo review is created with no `run_id`, inside the `if (!pr)` block, before the built-in agents exist
+
+The sample review + findings (`seed.ts:137-176`) are inserted while creating
+PR #482 for the first time, but linking them to an `agent_runs` row (so the
+PR detail TIMELINE has a real run to render, not just a bare commit) needs an
+`agentId` — and the built-in agents aren't seeded until *after* that block
+(`seed.ts:179-222`). A run insertion has to happen in a separate pass after
+the agents loop, re-querying the review by `prId` + `kind: 'review'` (the
+local `review` binding from the PR-creation block is out of scope by then) and
+guarding on `reviews.runId` being null so re-seeding stays idempotent per this
+file's stated contract. Evidence: `src/db/seed.ts` (the "demo agent run"
+block after the agents loop).
+
+### 2026-09-19 — a regression test for removing a time-window heuristic must backdate a timestamp
+
+Two runs triggered back-to-back in a testcontainers test (`waitForPrRuns`)
+complete milliseconds apart — well inside any plausible time window — so a
+naive "trigger twice, assert the sum" test passes identically on windowed and
+non-windowed code and proves nothing. Confirmed by reverting `rollupCostByPr`
+and re-running: the test only fails pre-fix once one run's `ran_at` is pushed
+back an hour via a direct `update()`. Evidence: `test/reviews.it.test.ts`
+("PR-list COST sums every successful run" test), `src/modules/pulls/status.ts`.
 
 ### 2026-09-18 — fields added to a jsonb-embedded contract must be optional
 

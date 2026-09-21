@@ -38,6 +38,27 @@ lesson fills them). `repo-intel` has its own deeper
 - No API keys required to boot — `loadConfig` marks every secret optional;
   `EMBEDDINGS_ENABLED=false` by default means **zero** OpenAI calls until set.
 
+## Naming conventions
+
+- **One plugin folder per domain** under `src/modules/<name>/`, with routes in
+  `routes.ts` registered statically from `src/modules/index.ts`. A domain with
+  logic too big for one file splits it into `repository.ts` /
+  `repository/*.repo.ts` (see `modules/reviews/`) rather than growing
+  `routes.ts`; a small pure-derivation helper that needs its own unit coverage
+  (`deriveReviewStatus`, `rollupCostByPr`) lives in a sibling `status.ts`-style
+  file next to the route, not inline.
+- **Tests**: `*.test.ts` is hermetic (mocked adapters, no network); `*.it.test.ts`
+  spins up real Postgres via testcontainers and is gated by `dockerAvailable()`.
+  Test helpers live under `test/helpers/`.
+- **DB columns are `snake_case`** (Postgres convention, via Drizzle's column
+  name argument, e.g. `text('run_id')`); the JS-side field on the same table
+  definition is `camelCase` (`runId`). Route handlers convert explicitly to the
+  wire contract's `snake_case` on the way out — never leak a Drizzle row shape
+  straight into a response.
+- **Adapters are ports**: one folder per external dependency under
+  `src/adapters/<name>/` (llm, github, git, astgrep, secrets, …), swapped for
+  mocks in tests via `src/platform/container.ts`'s DI container.
+
 ## Gotchas
 
 - Migrations are **not** applied on boot — `pnpm db:migrate` manually.
@@ -59,9 +80,14 @@ lesson fills them). `repo-intel` has its own deeper
 - `src/db/migrations/*` — drizzle-kit generated.
 - `src/vendor/shared` — vendored copy of `@devdigest/shared`, edit the source
   package instead.
+- `pnpm-lock.yaml` — regenerate via `pnpm install`, never hand-edit.
 
-## More
+## Read When
 
-[docs/](docs/) · [specs/](specs/) ·
-[INSIGHTS.md](INSIGHTS.md) — read before working in this package ·
-[TESTING.md](../TESTING.md)
+- Touching the DI container or an adapter port →
+  [docs/architecture.md](docs/architecture.md)
+- Touching the review-run flow (import → run → grounding → persist) →
+  [specs/review-flow.md](specs/review-flow.md)
+- Touching run cost → [specs/0001-run-cost.md](specs/0001-run-cost.md)
+- Anything in this package → [INSIGHTS.md](INSIGHTS.md) first,
+  [TESTING.md](../TESTING.md) before writing a test

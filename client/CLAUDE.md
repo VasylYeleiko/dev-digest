@@ -31,6 +31,23 @@ cross-cutting chrome (nav, breadcrumbs, `g`-then-key shortcuts).
 - All server data access goes through a `src/lib/hooks/*` TanStack Query
   hook — don't `fetch` directly from a component.
 
+## Naming conventions
+
+- **`_components/<Name>/`** (PascalCase folder, underscore prefix opts the
+  folder out of Next's route tree) — `<Name>.tsx`, plus siblings as needed:
+  `styles.ts` (the `s` object), `constants.ts`, `helpers.ts`, `index.ts`
+  (barrel re-export), `<Name>.test.tsx`. A component private to one parent
+  lives as a sibling file inside the parent's folder instead of its own
+  `_components/` subfolder (e.g. `FindingsPanel/SeverityBar.tsx`).
+- **Data hooks** — one file per API resource under `src/lib/hooks/`
+  (`reviews.ts`, `agents.ts`, …), each hook named `use<Noun>`
+  (`usePulls`, `useFindingAction`).
+- **i18n** — one message file per feature namespace at
+  `messages/<locale>/<namespace>.json`, read via
+  `useTranslations("<namespace>")`; keys are dot-nested by UI section
+  (`panel.hideLowConfidence`, `verdict.prScore`). `en` is the only locale
+  today.
+
 ## Gotchas
 
 - `*.test.tsx` here only covers component/interaction behavior with `fetch`
@@ -42,9 +59,13 @@ cross-cutting chrome (nav, breadcrumbs, `g`-then-key shortcuts).
 
 - `src/vendor/ui`, `src/vendor/shared` — vendored copies, edit the source
   package instead.
+- `pnpm-lock.yaml` — regenerate via `pnpm install`, never hand-edit.
 
-## More
+## Read When
 
-[docs/](docs/) · [specs/](specs/) ·
-[INSIGHTS.md](INSIGHTS.md) — read before working in this package ·
-[TESTING.md](../TESTING.md)
+- Touching route structure, Server/Client Component boundaries, or the
+  `_components/` convention → [docs/ui-architecture.md](docs/ui-architecture.md)
+- Touching a route's data or its URL params →
+  [specs/pages.md](specs/pages.md)
+- Anything in this package → [INSIGHTS.md](INSIGHTS.md) first,
+  [TESTING.md](../TESTING.md) before writing a test

@@ -3,10 +3,13 @@ import { formatCost } from "@/lib/cost";
 import { formatTokens } from "@/lib/tokens";
 
 /**
- * Per-run generation cost. Missing cost renders "—" (never "$0.00") so an
- * un-priced / failed / pre-tracking run reads differently from a genuine $0.
+ * Generation cost. Missing cost renders "—" (never "$0.00") so an un-priced /
+ * failed / pre-tracking run reads differently from a genuine $0.
  *
- * - `compact`    → "$0.014"              (PR list COST column)
+ * - `compact`    → "$0.014"              (PR list COST column — the SUM of
+ *                                         every successful run for the PR,
+ *                                         all-time; every other variant below
+ *                                         stays per-run)
  * - `withTokens` → "9,119 tok · $0.0013" (Agent-runs timeline, under the time)
  * - `verdict`    → "$0.014 · 8.2K→1.3K"  (verdict banner title row)
  */

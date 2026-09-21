@@ -41,19 +41,26 @@ export class ReviewService {
   // ===========================================================================
 
   /**
-   * Resolve which agents to run. `all` → all enabled agents; else a single agent.
+   * Resolve which agents to run. `agentIds` (hand-picked subset, checked
+   * first) → those agents; `all` → all enabled agents; else a single agent.
    */
   async resolveTargets(
     workspaceId: string,
-    opts: { agentId?: string; all?: boolean },
+    opts: { agentId?: string; all?: boolean; agentIds?: string[] },
   ): Promise<AgentRow[]> {
+    if (opts.agentIds?.length) {
+      const found = await Promise.all(opts.agentIds.map((id) => this.agents.getById(workspaceId, id)));
+      const missing = opts.agentIds.filter((_, i) => !found[i]);
+      if (missing.length) throw new NotFoundError(`Agent(s) not found: ${missing.join(', ')}`);
+      return found as AgentRow[];
+    }
     if (opts.all) return this.agents.listEnabled(workspaceId);
     if (opts.agentId) {
       const agent = await this.agents.getById(workspaceId, opts.agentId);
       if (!agent) throw new NotFoundError('Agent not found');
       return [agent];
     }
-    throw new AppError('invalid_run_request', 'Provide agentId or all:true', 400);
+    throw new AppError('invalid_run_request', 'Provide agentId, agentIds, or all:true', 400);
   }
 
   /** Delete a whole review run (one agent's pass) + its findings (cascade). */

@@ -249,12 +249,25 @@ export interface MockGitOptions {
   head?: string;
   /** Head `currentHead()` returns AFTER `sync()` runs — simulates fetch+reset advancing HEAD. */
   syncedHead?: string;
+  /**
+   * Make `diff()` throw "unknown revision" until `fetchPullHead()` has been
+   * called at least once — simulates a real open PR whose head was never
+   * fetched into the local clone (`diff-loader.ts`'s A1 retry path).
+   */
+  diffFailsUntilFetchPullHead?: boolean;
+  /**
+   * Make `diff()` AND `fetchPullHead()` always throw — simulates no local
+   * clone existing at all (`diff-loader.ts` falls straight to `pr_files`).
+   */
+  noLocalClone?: boolean;
 }
 
 export class MockGitClient implements GitClient {
   public cloned: { repo: RepoRef; url: string }[] = [];
   public syncs: { repo: RepoRef; branch: string }[] = [];
+  public fetchPullHeadCalls: { repo: RepoRef; n: number }[] = [];
   private syncedHead?: string;
+  private pullHeadFetched = false;
 
   constructor(private opts: MockGitOptions = {}) {}
 
@@ -265,7 +278,11 @@ export class MockGitClient implements GitClient {
     this.cloned.push({ repo, url });
     return { path: this.clonePathFor(repo) };
   }
-  async fetchPullHead(): Promise<void> {}
+  async fetchPullHead(repo: RepoRef, n: number): Promise<void> {
+    this.fetchPullHeadCalls.push({ repo, n });
+    if (this.opts.noLocalClone) throw new Error('fatal: repository not found (mock: no local clone)');
+    this.pullHeadFetched = true;
+  }
   async sync(repo: RepoRef, branch: string): Promise<{ head: string }> {
     this.syncs.push({ repo, branch });
     // After a sync, HEAD advances to syncedHead (or stays at head if unset).
@@ -279,6 +296,12 @@ export class MockGitClient implements GitClient {
     return this.opts.diffNameOnly ?? [];
   }
   async diff(): Promise<UnifiedDiff> {
+    if (this.opts.noLocalClone) {
+      throw new Error('fatal: not a git repository (mock: no local clone)');
+    }
+    if (this.opts.diffFailsUntilFetchPullHead && !this.pullHeadFetched) {
+      throw new Error("fatal: ambiguous argument 'head': unknown revision (mock: PR head not fetched)");
+    }
     const raw =
       this.opts.diff ??
       'diff --git a/src/config.ts b/src/config.ts\n--- a/src/config.ts\n+++ b/src/config.ts\n@@ -10,3 +10,4 @@\n   port: 3000,\n+  stripeKey: "sk_live_xxx",\n   redisUrl: x,';

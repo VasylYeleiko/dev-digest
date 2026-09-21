@@ -33,6 +33,20 @@ come from `@devdigest/shared`.
   diff + system prompt + repo map, so those sections are simply omitted, not
   empty-rendered.
 
+## Naming conventions
+
+- **One file per pipeline stage**, named after the verb it performs
+  (`prompt.ts`, `grounding.ts`, `reduce.ts`), not after a noun/class — there
+  are no classes here, only exported functions. `review/run.ts` is the
+  exception: it orchestrates the other stages, so it lives in its own
+  `review/` folder rather than at the top level.
+- **Contracts are imported, never redefined.** `Review`, `Finding`, `Verdict`
+  come from `@devdigest/shared`; this package adds no parallel local types for
+  them.
+- Tests are hermetic only (`pnpm test`, stubbed `LLMProvider`) — there is no
+  `*.it.test.ts` split here, unlike `server/`, because this package has no DB
+  or network dependency to gate on Docker.
+
 ## Gotchas
 
 - Never strip `wrapUntrusted`/`INJECTION_GUARD` from `prompt.ts` — it's the
@@ -45,9 +59,13 @@ come from `@devdigest/shared`.
 
 - `SEVERITY_PENALTY` weights (in `review/reduce.ts`) without checking the
   score contract the client renders against.
+- `package-lock.json` — regenerate via `npm install`, never hand-edit.
 
-## More
+## Read When
 
-[docs/](docs/) · [specs/](specs/) ·
-[INSIGHTS.md](INSIGHTS.md) — read before working in this package ·
-[TESTING.md](../TESTING.md)
+- Touching the pipeline order or `assemblePrompt`'s slots →
+  [docs/pipeline.md](docs/pipeline.md)
+- Touching `groundFindings` or the score recomputation →
+  [specs/grounding.md](specs/grounding.md)
+- Anything in this package → [INSIGHTS.md](INSIGHTS.md) first,
+  [TESTING.md](../TESTING.md) before writing a test

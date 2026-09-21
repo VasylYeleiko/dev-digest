@@ -8,4 +8,5 @@ accept (a later-lesson input fed *into* review prompts, see
 [`../README.md`](../README.md)) — this folder is contributor-facing
 documentation, not runtime input.
 
-Nothing here yet.
+- [grounding.md](grounding.md) — the citation gate, why it exists, and the
+  score-recomputation contract

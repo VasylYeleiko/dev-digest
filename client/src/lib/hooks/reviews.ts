@@ -114,20 +114,23 @@ export function useCreatePrComment(prId: string | null | undefined) {
   });
 }
 
-// ---- Run a review (all enabled agents or a specific agent) ----
+// ---- Run a review (all enabled agents, a specific agent, or a hand-picked subset) ----
 export interface RunReviewInput {
   prId: string;
   agentId?: string;
   all?: boolean;
+  /** Run a hand-picked subset of agents (multi-select). */
+  agentIds?: string[];
 }
 
 export function useRunReview() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ prId, agentId, all }: RunReviewInput) =>
+    mutationFn: ({ prId, agentId, all, agentIds }: RunReviewInput) =>
       api.post<ReviewRunResponse>(`/pulls/${prId}/review`, {
         ...(agentId ? { agentId } : {}),
         ...(all ? { all } : {}),
+        ...(agentIds?.length ? { agentIds } : {}),
       }),
     onSuccess: (_d, { prId }) => {
       qc.invalidateQueries({ queryKey: ["reviews", prId] });

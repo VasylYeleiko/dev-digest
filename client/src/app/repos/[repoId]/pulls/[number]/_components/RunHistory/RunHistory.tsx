@@ -3,8 +3,10 @@
 import React from "react";
 import { useTranslations } from "next-intl";
 import { Badge, Icon, CircularScore, type IconName } from "@devdigest/ui";
-import type { RunSummary, PrCommit } from "@devdigest/shared";
+import type { RunSummary, PrCommit, FindingRecord } from "@devdigest/shared";
 import { RunCostBadge } from "@/components/RunCostBadge";
+import { FindingsPopover } from "@/components/FindingsPopover";
+import { severityCounts, sortedForPreview } from "./helpers";
 
 /**
  * PR timeline — every agent run interleaved with the PR's commits, newest-first
@@ -88,12 +90,19 @@ function tsOf(s: string | null | undefined): number {
 export function RunHistory({
   runs,
   commits = [],
+  findingsByRun,
   onOpenTrace,
   onGoToReview,
   onDelete,
 }: {
   runs: RunSummary[];
   commits?: PrCommit[];
+  /** This run's findings, keyed by `run_id` — powers the severity icons +
+   *  findings popover in place of the plain "N finding(s)" text. Absent (or a
+   *  run missing from the map) falls back to that text, which covers a
+   *  0-finding run, a run whose review was deleted, and the first paint
+   *  before the reviews query resolves. */
+  findingsByRun?: Record<string, FindingRecord[]>;
   /** Open the trace + log drawer for a run (the logs icon). */
   onOpenTrace: (runId: string) => void;
   /** Jump to this run's inline review accordion below (clicking the agent name). */
@@ -189,12 +198,26 @@ export function RunHistory({
                   {r.error}
                 </div>
               )}
-              {settled && (
-                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  {t("runStatus.findings", { count: r.findings_count ?? 0 })}
-                  {(r.blockers ?? 0) > 0 ? t("runStatus.blockers", { count: r.blockers ?? 0 }) : ""}
-                </div>
-              )}
+              {settled && (() => {
+                const findings = findingsByRun?.[r.run_id];
+                if (!findings || findings.length === 0) {
+                  return (
+                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                      {t("runStatus.findings", { count: r.findings_count ?? 0 })}
+                      {(r.blockers ?? 0) > 0 ? t("runStatus.blockers", { count: r.blockers ?? 0 }) : ""}
+                    </div>
+                  );
+                }
+                return (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
+                    <FindingsPopover
+                      counts={severityCounts(findings)}
+                      preview={sortedForPreview(findings)}
+                    />
+                    {(r.blockers ?? 0) > 0 ? t("runStatus.blockers", { count: r.blockers ?? 0 }) : ""}
+                  </div>
+                );
+              })()}
             </div>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, fontSize: 11, color: "var(--text-muted)", flexShrink: 0 }}>
               {r.ran_at && <span>{new Date(r.ran_at).toLocaleTimeString()}</span>}

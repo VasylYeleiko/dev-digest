@@ -8,6 +8,10 @@ export const SEVERITY_ORDER: Record<string, number> = {
   INFO: 3,
 };
 
+/** Render order for the counter pills + filter buttons (contract enum, 3 values). */
+export const SEVERITIES = ["CRITICAL", "WARNING", "SUGGESTION"] as const;
+export type FindingSeverity = (typeof SEVERITIES)[number];
+
 /** Confidence below this is hidden when "hide low confidence" is on. */
 export const LOW_CONFIDENCE_THRESHOLD = 0.65;
 

@@ -14,6 +14,7 @@ import {
   RunTrace,
   Settings,
   Repo,
+  PrMeta,
   PrDetail,
 } from '@devdigest/shared';
 
@@ -228,5 +229,56 @@ describe('platform DTOs', () => {
         commits: [],
       }),
     ).not.toThrow();
+  });
+
+  it('PrMeta round-trips the list rollup fields (cost_usd, findings, findings_preview)', () => {
+    // Never-reviewed PR: the three rollup fields are absent, not zeroed.
+    const unreviewed = PrMeta.parse({
+      number: 1,
+      title: 't',
+      author: 'a',
+      branch: 'b',
+      base: 'main',
+      head_sha: 'sha',
+      additions: 0,
+      deletions: 0,
+      files_count: 0,
+      status: 'open',
+    });
+    expect(unreviewed.cost_usd).toBeUndefined();
+    expect(unreviewed.findings).toBeUndefined();
+    expect(unreviewed.findings_preview).toBeUndefined();
+
+    // Reviewed PR: cost_usd is the all-run total; findings is the latest
+    // review's severity tally; findings_preview is read-only finding rows.
+    const reviewed = PrMeta.parse({
+      number: 482,
+      title: 't',
+      author: 'a',
+      branch: 'b',
+      base: 'main',
+      head_sha: 'sha',
+      additions: 1,
+      deletions: 0,
+      files_count: 1,
+      status: 'open',
+      cost_usd: 0.014,
+      findings: { critical: 1, warning: 1, suggestion: 0 },
+      findings_preview: [
+        {
+          id: 'f1',
+          severity: 'CRITICAL',
+          category: 'security',
+          title: 'Hardcoded Stripe secret key in commit',
+          file: 'src/config.ts',
+          start_line: 12,
+          confidence: 0.98,
+          rationale: 'Line 12 contains a literal `sk_live_` Stripe key.',
+        },
+      ],
+    });
+    expect(reviewed.cost_usd).toBe(0.014);
+    expect(reviewed.findings).toEqual({ critical: 1, warning: 1, suggestion: 0 });
+    expect(reviewed.findings_preview?.[0]?.file).toBe('src/config.ts');
   });
 });

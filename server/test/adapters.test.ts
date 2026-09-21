@@ -104,4 +104,22 @@ describe('pricing / cost discipline', () => {
     expect(estimateCost('gpt-4o-mini', 1_000_000, 0)).toBeCloseTo(0.15, 5);
     expect(estimateCost('some-future-model', 1000, 1000)).toBeNull();
   });
+
+  it('resolves a dated model snapshot to its undated pricing entry', () => {
+    // The exact case from the reported bug: a dated Anthropic snapshot id
+    // with no entry of its own should still price via "claude-haiku-4-5".
+    const dated = estimateCost('claude-haiku-4-5-20251001', 1_000_000, 0);
+    const undated = estimateCost('claude-haiku-4-5', 1_000_000, 0);
+    expect(dated).not.toBeNull();
+    expect(dated).toBeCloseTo(undated!, 10);
+  });
+
+  it('an unknown dated snapshot (no undated entry either) still returns null', () => {
+    expect(estimateCost('some-future-model-20991231', 1000, 1000)).toBeNull();
+  });
+
+  it('a non-8-digit suffix is not treated as a date and does not match an unrelated entry', () => {
+    // "-4-5" itself must not be mistaken for a date suffix.
+    expect(estimateCost('claude-haiku-4-5', 1_000_000, 0)).not.toBeNull();
+  });
 });

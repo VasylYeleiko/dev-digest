@@ -5,9 +5,9 @@
  * and shows the review score ring.
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
-import type { RunSummary } from "@devdigest/shared";
+import type { RunSummary, FindingRecord } from "@devdigest/shared";
 import messages from "../../../../../../../../messages/en/prReview.json";
 import { RunHistory } from "./RunHistory";
 
@@ -35,12 +35,34 @@ function run(o: Partial<RunSummary>): RunSummary {
   };
 }
 
-function renderRuns(runs: RunSummary[]) {
+function renderRuns(runs: RunSummary[], findingsByRun?: Record<string, FindingRecord[]>) {
   return render(
     <NextIntlClientProvider locale="en" messages={{ prReview: messages }}>
-      <RunHistory runs={runs} onOpenTrace={() => {}} />
+      <RunHistory runs={runs} findingsByRun={findingsByRun} onOpenTrace={() => {}} />
     </NextIntlClientProvider>,
   );
+}
+
+function finding(o: Partial<FindingRecord>): FindingRecord {
+  return {
+    id: "f1",
+    review_id: "review-1",
+    severity: "CRITICAL",
+    category: "security",
+    title: "Hardcoded Stripe secret key in commit",
+    file: "src/config.ts",
+    start_line: 12,
+    end_line: 12,
+    rationale: "Line 12 contains a literal sk_live_ Stripe key.",
+    suggestion: null,
+    confidence: 0.98,
+    kind: null,
+    trifecta_components: null,
+    evidence: null,
+    accepted_at: null,
+    dismissed_at: null,
+    ...o,
+  };
 }
 
 describe("RunHistory — outcome badge", () => {
@@ -94,5 +116,57 @@ describe("RunHistory — cost badge", () => {
       run({ status: "running", tokens_in: 9000, tokens_out: 119, cost_usd: 0.0013, score: null }),
     ]);
     expect(screen.queryByText(/tok ·/)).not.toBeInTheDocument();
+  });
+});
+
+describe("RunHistory — findings popover", () => {
+  it("with findingsByRun, renders severity icons instead of the 'N finding(s)' text", () => {
+    const r = run({ run_id: "run-a", status: "done", findings_count: 2, blockers: 0, score: 72 });
+    const { container } = renderRuns(
+      [r],
+      { "run-a": [finding({ id: "f1", severity: "CRITICAL" }), finding({ id: "f2", severity: "WARNING" })] },
+    );
+
+    expect(screen.queryByText("2 finding(s)")).not.toBeInTheDocument();
+    const icons = container.querySelectorAll("svg.lucide-octagon-alert, svg.lucide-triangle-alert");
+    expect(icons).toHaveLength(2);
+  });
+
+  it("a run missing from findingsByRun falls back to the 'N finding(s)' text", () => {
+    renderRuns([run({ run_id: "run-b", status: "done", findings_count: 4, blockers: 0, score: 90 })], {});
+    expect(screen.getByText("4 finding(s)")).toBeInTheDocument();
+  });
+
+  it("a 0-finding run still reads '0 finding(s)', never icons", () => {
+    renderRuns(
+      [run({ run_id: "run-c", status: "done", findings_count: 0, blockers: 0, score: 100 })],
+      { "run-c": [] },
+    );
+    expect(screen.getByText("0 finding(s)")).toBeInTheDocument();
+  });
+
+  it("blockers text still renders next to the icons", () => {
+    const r = run({ run_id: "run-d", status: "done", findings_count: 1, blockers: 1, score: 20 });
+    renderRuns([r], { "run-d": [finding({ id: "f1", severity: "CRITICAL" })] });
+    expect(screen.getByText(/1 blockers/)).toBeInTheDocument();
+  });
+
+  it("hovering the icons opens a portaled panel scoped to that run's findings", () => {
+    const r = run({ run_id: "run-e", status: "done", findings_count: 1, blockers: 0, score: 61 });
+    const { container } = renderRuns([r], { "run-e": [finding({ id: "f1" })] });
+
+    const trigger = container.querySelector('[tabindex="0"]') as HTMLElement;
+    fireEvent.mouseEnter(trigger);
+
+    const header = screen.getByText("1 FINDINGS IN THIS RUN");
+    expect(header).toBeInTheDocument();
+    expect(screen.getByText("Hardcoded Stripe secret key in commit")).toBeInTheDocument();
+    expect(screen.getByText("src/config.ts:12")).toBeInTheDocument();
+    expect(screen.getByText("98% conf")).toBeInTheDocument();
+
+    // Portaled to document.body, per client/INSIGHTS.md — escapes any
+    // overflow:hidden ancestor.
+    expect(container.contains(header)).toBe(false);
+    expect(document.body.contains(header)).toBe(true);
   });
 });

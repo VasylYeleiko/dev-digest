@@ -75,18 +75,20 @@ every read, so plain `.nullable()` is correct there.
 Responses on these routes are plain TS return types (only `params` are
 Zod-validated), so no route schema changed.
 
-## PR-list rollup — latest review batch
+## PR-list rollup — all successful runs
 
-The list's COST column is **the sum of the latest review batch**, not one
-agent's slice: "Review all" fans out N agents within seconds, and showing only
-the newest of them would under-report the number a user just paid.
+The list's COST column is **the sum of every successful run, all-time**, not
+just the latest one: a PR that gets re-reviewed a week later should show
+cumulative spend, not the newest agent's slice. "Review all" fans out N agents
+within seconds, and re-reviewing later adds more runs on top — every one of
+them counts.
 
-There is no batch or session id in the schema. `modules/pulls/routes.ts`
-approximates one: completed priced runs, newest-first; the first run seen per PR
-anchors the window; every later run within `BATCH_WINDOW_MS` (120s) of that
-anchor joins the same batch. Computed on read via one `inArray` query plus JS
-grouping — the same shape as the `score` block directly above it, and never
-denormalized onto `pull_requests`.
+`modules/pulls/routes.ts` sums all `status='done'` priced runs for the PR via
+the pure `rollupCostByPr` helper (`modules/pulls/status.ts`). Computed on read
+via one `inArray` query plus JS grouping — the same shape as the `score` block
+directly above it, and never denormalized onto `pull_requests`. There is no
+time window: a PR reviewed once today and again next month shows the sum of
+both.
 
 ## UI surfaces
 
@@ -113,7 +115,8 @@ matched client-side on `run_id`.
 ## Acceptance criteria
 
 1. A completed run persists its cost; every read path returns the same value.
-2. PR list shows COST between STATUS and UPDATED; no priced run → `—`.
+2. PR list shows COST between STATUS and UPDATED = the sum of every
+   successful run for the PR, all-time; no priced run → `—`.
 3. Settled timeline runs show total tokens · cost; running runs show nothing.
 4. The trace drawer shows COST beside DURATION / TOKENS / FINDINGS.
 5. The verdict banner shows cost · tokens for a priced run.
@@ -123,9 +126,11 @@ matched client-side on `run_id`.
 
 ## Open questions
 
-- **The 120s batch window is a heuristic.** If a review-session or batch id is
-  ever added to the schema, replace the window in `modules/pulls/routes.ts` with
-  exact grouping.
+- **JS grouping over SQL `sum()`.** `rollupCostByPr` groups in JS to match the
+  `score` block's convention and to unit-test hermetically without Docker
+  (`server/test/pulls-status.test.ts`). Revisit only if the PR list ever
+  paginates past a few hundred rows — a `sum()` + `group by` would then be
+  cheaper, at the cost of losing hermetic coverage to the `.it.test.ts` suite.
 - **Cached and reasoning tokens are ignored.** OpenRouter returns
   `prompt_tokens_details.cached_tokens` and
   `completion_tokens_details.reasoning_tokens`; we read neither. This only

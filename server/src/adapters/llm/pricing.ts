@@ -20,10 +20,17 @@ const PRICING: Record<string, Price> = {
   'gpt-4o': { in: 2.5, out: 10.0 },
   'gpt-4o-mini': { in: 0.15, out: 0.6 },
   'text-embedding-3-small': { in: 0.02, out: 0 },
-  // Anthropic
+  // Anthropic. Prices are APPROXIMATE (see the OpenRouter comment below) —
+  // confirm against anthropic.com/pricing before relying on cost.
   'claude-3-5-sonnet-latest': { in: 3.0, out: 15.0 },
   'claude-3-5-haiku-latest': { in: 0.8, out: 4.0 },
   'claude-3-opus-latest': { in: 15.0, out: 75.0 },
+  // Current router targets (model-router.ts) — undated aliases. A dated
+  // snapshot id (e.g. "claude-haiku-4-5-20251001") resolves to these via
+  // estimateCost()'s date-suffix stripping below, so it doesn't need its own
+  // entry every time a new snapshot ships.
+  'claude-haiku-4-5': { in: 0.8, out: 4.0 },
+  'claude-sonnet-4-6': { in: 3.0, out: 15.0 },
   // OpenRouter (CI runner, cheap models). Slugs + prices are APPROXIMATE and
   // must be confirmed against openrouter.ai/models before relying on cost.
   // Unknown slugs fall through to null cost (explicitly flagged), which is safe.
@@ -35,7 +42,17 @@ const PRICING: Record<string, Price> = {
 };
 
 export function estimateCost(model: string, tokensIn: number, tokensOut: number): number | null {
-  const p = PRICING[model];
+  const p = PRICING[model] ?? PRICING[stripDateSuffix(model)];
   if (!p) return null;
   return (tokensIn * p.in + tokensOut * p.out) / 1_000_000;
+}
+
+/**
+ * Strip a trailing dated-snapshot suffix (e.g. "claude-haiku-4-5-20251001"
+ * → "claude-haiku-4-5") so a dated model variant still resolves against its
+ * undated pricing entry, without needing a table update every time a
+ * provider ships a new dated snapshot alongside its "latest" alias.
+ */
+function stripDateSuffix(model: string): string {
+  return model.replace(/-\d{8}$/, '');
 }

@@ -15,6 +15,22 @@ Written by the `engineering-insights` skill. Format:
 
 ## What Doesn't Work
 
+### 2026-09-20 — `./scripts/e2e.sh` / `npm test` cannot run locally on Windows — always `spawn EINVAL`
+
+`run.ts`'s `ab()` helper calls `execFile(BIN, args, {...})` with no `shell`
+option (`run.ts`'s `exec = promisify(execFile)`). On Windows, `npm i -g
+agent-browser` installs a `.cmd` shim (plus a `.ps1` and an extensionless
+POSIX shim) — there is no native `.exe`. Node's `child_process.execFile`
+refuses to spawn a `.cmd`/`.bat` directly without `shell: true` (EINVAL,
+regardless of whether `AGENT_BROWSER_BIN` points at the plain name or an
+explicit `...\agent-browser.cmd` path, POSIX- or Windows-style). All 8 flows
+fail identically with the same error, including ones that predate any given
+session — this is not something a spec or seed change can trigger or fix.
+CI is unaffected: `.github/workflows/e2e-web.yml` runs on `ubuntu-latest`,
+where the global install is a real binary. On Windows, verify a UI change
+manually against the running dev stack instead of trying to get the hermetic
+runner green locally.
+
 ## Codebase Patterns
 
 ## Tool & Library Notes

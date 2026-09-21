@@ -1,0 +1,16 @@
+{
+  "name": "PR timeline: severity icons open the findings popover",
+  "description": "From PR #482's Agent runs tab, the TIMELINE's seeded run row now shows severity icons in place of the plain '2 finding(s)' text (server/src/db/seed.ts links the seeded review to a demo agent_runs row). Clicking the findings trigger pins open a read-only popover listing that run's findings. agent-browser has no hover command, so this exercises the click-to-pin path — the reason FindingsPopover supports it. Read-only seeded data (no model call). Assumes a freshly-seeded DB where acme/payments-api (PR #482) is the first repo — guaranteed by e2e-web.yml; run locally via the hermetic stack (see e2e/README.md).",
+  "steps": [
+    { "cmd": ["open", "{BASE}/"], "label": "load the app root" },
+    { "cmd": ["wait", "--url", "/pulls"], "label": "land on the PR list" },
+    { "cmd": ["find", "text", "Add rate limiting to public API endpoints", "click"], "label": "open the PR row" },
+    { "cmd": ["wait", "--url", "/pulls/482"], "label": "navigate to the PR detail route" },
+    { "cmd": ["wait", "--load", "networkidle"], "label": "PR detail data settles" },
+    { "cmd": ["find", "role", "button", "click", "--name", "Agent runs"], "label": "switch to the Agent runs tab" },
+    { "cmd": ["wait", "--url", "tab=findings"], "label": "findings tab is active in the URL" },
+    { "cmd": ["find", "label", "2 findings — show details", "click"], "label": "click the timeline run's findings trigger" },
+    { "cmd": ["wait", "--text", "2 FINDINGS IN THIS RUN"], "label": "popover opens, pinned, with the run's finding count" },
+    { "cmd": ["wait", "--text", "Hardcoded Stripe secret key in commit"], "label": "the seeded finding is listed in the popover" }
+  ]
+}

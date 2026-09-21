@@ -103,6 +103,20 @@ export class ReviewRunExecutor {
       await failAll(`Failed to load PR diff: ${(err as Error).message}`);
       return;
     }
+
+    // loadDiff() never throws on an empty result (it has its own fallback
+    // chain) — an empty diff for a PR GitHub already told us has changes
+    // means every fallback failed, not that the PR is genuinely empty.
+    // Reviewing an empty diff silently produces a confidently-wrong
+    // approve/0-findings result, so fail loudly instead — same path as a
+    // real pre-work throw above.
+    if (diff.files.length === 0 && pull.filesCount > 0) {
+      const msg = `Could not load a non-empty diff for this PR (GitHub reports ${pull.filesCount} changed file(s)) — try refreshing the repo.`;
+      runLog.error(msg);
+      await failAll(msg);
+      return;
+    }
+
     runLog.info(`Diff ready — ${diff.files.length} changed file(s); starting ${jobs.length} agent run(s)`);
 
     for (const { agent, runId } of jobs) {
