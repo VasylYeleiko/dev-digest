@@ -4,7 +4,7 @@ import { waitForPrRuns } from './helpers/runs.js';
 import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/platform/config.js';
 import { seed } from '../src/db/seed.js';
-import { MockLLMProvider, MockEmbedder, MockGitClient } from '../src/adapters/mocks.js';
+import { MockLLMProvider, MockEmbedder, MockGitClient, MockGitHubClient } from '../src/adapters/mocks.js';
 import * as t from '../src/db/schema.js';
 import { eq } from 'drizzle-orm';
 import type { Review } from '@devdigest/shared';
@@ -96,6 +96,41 @@ async function setupRepoAndPr(db: PgFixture['handle']['db'], workspaceId: string
   return { repo: repo!, pr: pr! };
 }
 
+/**
+ * Same as `setupRepoAndPr` but deliberately WITHOUT a `pr_files` row —
+ * reproduces a PR that's been synced (via the list endpoint, which never
+ * touches `pr_files`) but never had its detail page loaded, so `loadDiff`'s
+ * DB fallback starts empty. `filesCount: 9` mirrors the real bug report
+ * (GitHub says this PR has changes) so the run-executor guard's
+ * `pull.filesCount > 0` condition is exercised honestly.
+ */
+async function setupRepoAndPrNoFiles(db: PgFixture['handle']['db'], workspaceId: string) {
+  const name = `payments-api-${repoSeq++}`;
+  const [repo] = await db
+    .insert(t.repos)
+    .values({ workspaceId, owner: 'acme', name, fullName: `acme/${name}` })
+    .returning();
+  const [pr] = await db
+    .insert(t.pullRequests)
+    .values({
+      workspaceId,
+      repoId: repo!.id,
+      number: 482,
+      title: 'Add rate limiting',
+      author: 'marisa.koch',
+      branch: 'feat/rl',
+      base: 'main',
+      headSha: 'a1b2c3d4',
+      additions: 247,
+      deletions: 38,
+      filesCount: 9,
+      status: 'needs_review',
+      body: 'Add rate limiting. Closes #471.',
+    })
+    .returning();
+  return { repo: repo!, pr: pr! };
+}
+
 d('A2 reviews + agents (Testcontainers pg)', () => {
   let pg: PgFixture;
   let workspaceId: string;
@@ -159,7 +194,7 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
 
   it('runs a review: map-reduce + grounding drops the hallucinated finding, keeps the valid one', async () => {
     const app = await appWith(REVIEW_FIXTURE);
-    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+    const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
 
     const agent = (
       await app.inject({
@@ -208,6 +243,70 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     expect(run!.status).toBe('done');
     expect(run!.findingsCount).toBe(1);
     expect(run!.grounding).toBe('1/2 passed');
+
+    // Cost is READ off the engine outcome and persisted — never recomputed.
+    // MockLLMProvider bills 0.001 per structured call, so the exact total
+    // depends on the chunk count; what matters is that a real value survives
+    // the write and comes back identically on every read path.
+    const costUsd = run!.costUsd;
+    expect(costUsd).not.toBeNull();
+    expect(costUsd).toBeGreaterThan(0);
+    expect(trace.stats.cost_usd).toBe(costUsd);
+
+    const runs = (await app.inject({ method: 'GET', url: `/pulls/${pr.id}/runs` })).json();
+    expect(runs[0].cost_usd).toBe(costUsd);
+
+    // PR-list rollup sums every successful run for the PR; this PR has exactly one.
+    const pulls = (await app.inject({ method: 'GET', url: `/repos/${repo.id}/pulls` })).json();
+    const prRow = pulls.find((p: { id: string }) => p.id === pr.id);
+    expect(prRow.cost_usd).toBe(costUsd);
+
+    // PR-list FINDINGS tally + preview come from the same latest review:
+    // grounding kept one CRITICAL (the security key), dropped the WARNING.
+    expect(prRow.findings).toEqual({ critical: 1, warning: 0, suggestion: 0 });
+    expect(prRow.findings_preview).toHaveLength(1);
+    expect(prRow.findings_preview[0].file).toBe('src/config.ts');
+    expect(prRow.findings_preview[0].start_line).toBe(11);
+    expect(prRow.findings_preview[0].severity).toBe('CRITICAL');
+
+    await app.close();
+  });
+
+  it('PR-list COST sums every successful run, all-time — not just the latest batch', async () => {
+    const app = await appWith(REVIEW_FIXTURE);
+    const { repo, pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+    const agent = (
+      await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: { name: 'Sec', provider: 'openai', model: 'gpt-4.1', system_prompt: 'sec' },
+      })
+    ).json();
+
+    // First review run.
+    await app.inject({ method: 'POST', url: `/pulls/${pr.id}/review`, payload: { agentId: agent.id } });
+    await waitForPrRuns(pg.handle.db, pr.id, { expected: 1 });
+
+    // Backdate it by an hour — well outside the old 120s batch window. Without
+    // this, both runs land inside that window and the assertion below would
+    // pass on the OLD (windowed) code too, proving nothing.
+    await pg.handle.db
+      .update(t.agentRuns)
+      .set({ ranAt: new Date(Date.now() - 3_600_000) })
+      .where(eq(t.agentRuns.prId, pr.id));
+
+    // Second review run, an hour "later".
+    await app.inject({ method: 'POST', url: `/pulls/${pr.id}/review`, payload: { agentId: agent.id } });
+    await waitForPrRuns(pg.handle.db, pr.id, { expected: 2 });
+
+    const runRows = await pg.handle.db.select().from(t.agentRuns).where(eq(t.agentRuns.prId, pr.id));
+    expect(runRows).toHaveLength(2);
+    const expectedTotal = runRows.reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
+    expect(expectedTotal).toBeGreaterThan(0);
+
+    const pulls = (await app.inject({ method: 'GET', url: `/repos/${repo.id}/pulls` })).json();
+    const prRow = pulls.find((p: { id: string }) => p.id === pr.id);
+    expect(prRow.cost_usd).toBeCloseTo(expectedTotal, 10);
 
     await app.close();
   });
@@ -297,6 +396,167 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     ).json();
     // seed has 2 enabled agents; we may have created more above in this PR's ws.
     expect(body.runs.length).toBeGreaterThanOrEqual(2);
+    await app.close();
+  });
+
+  it('agentIds runs exactly the requested subset, one run per agent', async () => {
+    const app = await appWith(REVIEW_FIXTURE);
+    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+
+    const agent1 = (
+      await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: { name: 'Sub1', provider: 'openai', model: 'gpt-4.1', system_prompt: 'a' },
+      })
+    ).json();
+    const agent2 = (
+      await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: { name: 'Sub2', provider: 'openai', model: 'gpt-4.1', system_prompt: 'b' },
+      })
+    ).json();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/pulls/${pr.id}/review`,
+      payload: { agentIds: [agent1.id, agent2.id] },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.runs).toHaveLength(2);
+    expect(body.runs.map((r: { agent_id: string }) => r.agent_id).sort()).toEqual(
+      [agent1.id, agent2.id].sort(),
+    );
+
+    await app.close();
+  });
+
+  it('agentIds with an unknown id 404s and starts no runs', async () => {
+    const app = await appWith(REVIEW_FIXTURE);
+    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+
+    const agent1 = (
+      await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: { name: 'Sub1', provider: 'openai', model: 'gpt-4.1', system_prompt: 'a' },
+      })
+    ).json();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/pulls/${pr.id}/review`,
+      payload: { agentIds: [agent1.id, '00000000-0000-0000-0000-000000000000'] },
+    });
+    expect(res.statusCode).toBe(404);
+
+    await app.close();
+  });
+
+  it('loadDiff retries via fetchPullHead when the local clone is missing the PR head, and the review is NOT empty', async () => {
+    const git = new MockGitClient({ diff: DIFF, diffFailsUntilFetchPullHead: true });
+    const app = await buildApp({
+      config: config(),
+      db: pg.handle.db,
+      overrides: {
+        embedder: new MockEmbedder(),
+        git,
+        llm: { openai: new MockLLMProvider('openai', { structured: REVIEW_FIXTURE }) },
+      },
+    });
+    const { pr } = await setupRepoAndPrNoFiles(pg.handle.db, workspaceId);
+    const agent = (
+      await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: { name: 'Sec', provider: 'openai', model: 'gpt-4.1', system_prompt: 'sec' },
+      })
+    ).json();
+
+    await app.inject({ method: 'POST', url: `/pulls/${pr.id}/review`, payload: { agentId: agent.id } });
+    await waitForPrRuns(pg.handle.db, pr.id, { expected: 1 });
+
+    // The retry happened...
+    expect(git.fetchPullHeadCalls).toHaveLength(1);
+    expect(git.fetchPullHeadCalls[0]).toMatchObject({ n: 482 });
+    // ...and the review is real, not an empty-diff false approval.
+    const reviews = (await app.inject({ method: 'GET', url: `/pulls/${pr.id}/reviews` })).json();
+    expect(reviews).toHaveLength(1);
+    expect(reviews[0].findings.length).toBeGreaterThan(0);
+
+    await app.close();
+  });
+
+  it('loadDiff backfills pr_files from GitHub when both the local clone and the DB fallback are empty', async () => {
+    const git = new MockGitClient({ noLocalClone: true });
+    const github = new MockGitHubClient(); // default detail carries a real src/config.ts patch
+    const app = await buildApp({
+      config: config(),
+      db: pg.handle.db,
+      overrides: {
+        embedder: new MockEmbedder(),
+        git,
+        github,
+        llm: { openai: new MockLLMProvider('openai', { structured: REVIEW_FIXTURE }) },
+      },
+    });
+    const { pr } = await setupRepoAndPrNoFiles(pg.handle.db, workspaceId);
+    const agent = (
+      await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: { name: 'Sec', provider: 'openai', model: 'gpt-4.1', system_prompt: 'sec' },
+      })
+    ).json();
+
+    await app.inject({ method: 'POST', url: `/pulls/${pr.id}/review`, payload: { agentId: agent.id } });
+    await waitForPrRuns(pg.handle.db, pr.id, { expected: 1 });
+
+    // pr_files was backfilled from the GitHub mock's default file...
+    const files = await pg.handle.db.select().from(t.prFiles).where(eq(t.prFiles.prId, pr.id));
+    expect(files.length).toBeGreaterThan(0);
+    // ...and the review used it — real findings, not an empty-diff approval.
+    const reviews = (await app.inject({ method: 'GET', url: `/pulls/${pr.id}/reviews` })).json();
+    expect(reviews).toHaveLength(1);
+    expect(reviews[0].findings.length).toBeGreaterThan(0);
+
+    await app.close();
+  });
+
+  it('fails the run loudly instead of silently approving when every diff source is empty', async () => {
+    const git = new MockGitClient({ noLocalClone: true });
+    const github = new MockGitHubClient({ detail: { files: [] } }); // GitHub also has nothing
+    const app = await buildApp({
+      config: config(),
+      db: pg.handle.db,
+      overrides: {
+        embedder: new MockEmbedder(),
+        git,
+        github,
+        llm: { openai: new MockLLMProvider('openai', { structured: REVIEW_FIXTURE }) },
+      },
+    });
+    const { pr } = await setupRepoAndPrNoFiles(pg.handle.db, workspaceId); // filesCount: 9
+    const agent = (
+      await app.inject({
+        method: 'POST',
+        url: '/agents',
+        payload: { name: 'Sec', provider: 'openai', model: 'gpt-4.1', system_prompt: 'sec' },
+      })
+    ).json();
+
+    await app.inject({ method: 'POST', url: `/pulls/${pr.id}/review`, payload: { agentId: agent.id } });
+    const runs = await waitForPrRuns(pg.handle.db, pr.id, { expected: 1 });
+
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.status).toBe('failed');
+    expect(runs[0]!.error).toMatch(/non-empty diff/i);
+    // No confidently-wrong "approve / 0 findings" review was persisted.
+    const reviews = (await app.inject({ method: 'GET', url: `/pulls/${pr.id}/reviews` })).json();
+    expect(reviews).toHaveLength(0);
+
     await app.close();
   });
 });

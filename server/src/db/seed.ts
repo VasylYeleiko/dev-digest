@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { pathToFileURL } from 'node:url';
 import { createDb, type Db } from './client.js';
 import * as t from './schema.js';
 import { eq, and } from 'drizzle-orm';
@@ -220,11 +221,51 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
     if (!existing) await db.insert(t.agents).values(a);
   }
 
+  // ---- a demo agent run, backing the seeded review's PR timeline row ----
+  // The review above is inserted with no run_id (agent_runs didn't exist yet
+  // in its scope), so the PR detail page's TIMELINE has nothing to render but
+  // the commit. Link a run after the agents exist (this run needs an
+  // agentId), guarded on the review not already having one so re-seeding
+  // stays idempotent.
+  if (pr) {
+    const [seededReview] = await db
+      .select()
+      .from(t.reviews)
+      .where(and(eq(t.reviews.prId, pr.id), eq(t.reviews.kind, 'review')));
+    if (seededReview && !seededReview.runId) {
+      const [generalReviewer] = await db
+        .select()
+        .from(t.agents)
+        .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.name, 'General Reviewer')));
+      const [run] = await db
+        .insert(t.agentRuns)
+        .values({
+          workspaceId,
+          agentId: generalReviewer?.id ?? null,
+          prId: pr.id,
+          provider: DEFAULT_PROVIDER,
+          model: DEFAULT_MODEL,
+          durationMs: 8400,
+          tokensIn: 6200,
+          tokensOut: 980,
+          costUsd: 0.0021,
+          status: 'done',
+          source: 'local',
+          findingsCount: 2,
+          grounding: '2/2 passed',
+          score: seededReview.score,
+          blockers: 1,
+        })
+        .returning();
+      await db.update(t.reviews).set({ runId: run!.id }).where(eq(t.reviews.id, seededReview.id));
+    }
+  }
+
   return { workspaceId, userId };
 }
 
 // CLI entrypoint
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const url = process.env.DATABASE_URL;
   if (!url) {
     console.error('DATABASE_URL is required');

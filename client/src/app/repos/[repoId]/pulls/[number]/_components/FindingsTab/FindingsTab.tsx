@@ -71,6 +71,18 @@ export function FindingsTab({
     setTarget((p) => ({ runId, n: (p?.n ?? 0) + 1 }));
   }, []);
 
+  // `runs` here are REVIEWS, not agent runs (see client/INSIGHTS.md) — join
+  // by run_id to give each timeline row its findings. Appends rather than
+  // overwrites: one run can produce both a `summary` and a `review` row.
+  const findingsByRun = React.useMemo(() => {
+    const map: Record<string, FindingRecord[]> = {};
+    for (const review of runs) {
+      if (!review.run_id) continue;
+      (map[review.run_id] ??= []).push(...review.findings);
+    }
+    return map;
+  }, [runs]);
+
   return (
     <section>
       {liveRunIds.length > 0 && (
@@ -131,6 +143,7 @@ export function FindingsTab({
           <RunHistory
             runs={prRuns ?? []}
             commits={prCommits}
+            findingsByRun={findingsByRun}
             onOpenTrace={handleOpenTrace}
             onGoToReview={handleGoToReview}
             onDelete={handleDelete}
@@ -158,6 +171,9 @@ export function FindingsTab({
           <ReviewRunAccordion
             key={review.id}
             review={review}
+            // `runs` here are REVIEWS; the agent run carrying cost/tokens lives
+            // in `prRuns`, matched by run_id (null when the run was deleted).
+            run={prRuns?.find((r) => r.run_id === review.run_id) ?? null}
             prId={prId}
             defaultOpen={i === 0}
             repoFullName={repoFullName}

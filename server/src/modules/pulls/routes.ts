@@ -1,13 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { and, desc, eq, inArray } from 'drizzle-orm';
-import type { PrMeta, PrDetail, GitHubClient, PrReviewComment } from '@devdigest/shared';
+import type { PrMeta, PrDetail, GitHubClient, PrReviewComment, Finding } from '@devdigest/shared';
 import { PrCommentInput } from '@devdigest/shared';
 import * as t from '../../db/schema.js';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { AppError, NotFoundError } from '../../platform/errors.js';
-import { deriveReviewStatus } from './status.js';
+import { deriveReviewStatus, rollupCostByPr, rollupSeverities, previewFindings } from './status.js';
 
 /**
  * F1 — pulls module. PR import via Octokit (list + per-PR detail).
@@ -111,27 +111,77 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
       }
     }
 
-    // Latest-review SCORE per PR for the list's score ring. Computed on read
-    // from reviews (no FK denorm); the list is small, so one IN-query + JS
-    // grouping is cheap. (The per-severity FINDINGS breakdown is intentionally
-    // not surfaced on the list — findings live on the PR detail page.)
+    // Latest-review SCORE + FINDINGS breakdown per PR for the list. Computed on
+    // read from reviews (no FK denorm); the list is small, so one IN-query + JS
+    // grouping is cheap. The per-severity FINDINGS breakdown IS surfaced on the
+    // list (the row's severity icons + "N FINDINGS IN THIS RUN" popover) —
+    // "this run" means the PR's latest review, the same one SCORE reads from.
     const prIds = rows.map((r) => r.id);
-    const latestReviewByPr = new Map<string, { score: number | null }>();
+    const latestReviewByPr = new Map<string, { id: string; score: number | null }>();
     if (prIds.length > 0) {
       const reviewRows = await container.db
-        .select({ prId: t.reviews.prId, score: t.reviews.score })
+        .select({ id: t.reviews.id, prId: t.reviews.prId, score: t.reviews.score })
         .from(t.reviews)
         .where(and(inArray(t.reviews.prId, prIds), eq(t.reviews.kind, 'review')))
         .orderBy(desc(t.reviews.createdAt));
       // Rows are newest-first → first seen per PR is the latest review.
       for (const rv of reviewRows) {
-        if (!latestReviewByPr.has(rv.prId)) latestReviewByPr.set(rv.prId, { score: rv.score });
+        if (!latestReviewByPr.has(rv.prId)) latestReviewByPr.set(rv.prId, { id: rv.id, score: rv.score });
       }
     }
+
+    // Findings of each PR's latest review, for the FINDINGS severity tally +
+    // the row popover's read-only preview. Same on-read IN-query + JS grouping
+    // convention as the score block above.
+    const reviewIds = [...latestReviewByPr.values()].map((rv) => rv.id);
+    const findingsByReview = new Map<
+      string,
+      { severity: string; category: string; title: string; file: string; startLine: number; confidence: number; rationale: string; id: string }[]
+    >();
+    if (reviewIds.length > 0) {
+      const findingRows = await container.db
+        .select({
+          reviewId: t.findings.reviewId,
+          id: t.findings.id,
+          severity: t.findings.severity,
+          category: t.findings.category,
+          title: t.findings.title,
+          file: t.findings.file,
+          startLine: t.findings.startLine,
+          confidence: t.findings.confidence,
+          rationale: t.findings.rationale,
+        })
+        .from(t.findings)
+        .where(inArray(t.findings.reviewId, reviewIds));
+      for (const f of findingRows) {
+        const list = findingsByReview.get(f.reviewId) ?? [];
+        list.push(f);
+        findingsByReview.set(f.reviewId, list);
+      }
+    }
+
+    // Total COST per PR for the list's COST column — the sum of EVERY
+    // successful run, all-time, not just the latest review. Same on-read
+    // IN-query + JS grouping convention as the score block above.
+    const costByPr = prIds.length
+      ? rollupCostByPr(
+          await container.db
+            .select({ prId: t.agentRuns.prId, costUsd: t.agentRuns.costUsd })
+            .from(t.agentRuns)
+            .where(
+              and(
+                eq(t.agentRuns.workspaceId, workspaceId),
+                inArray(t.agentRuns.prId, prIds),
+                eq(t.agentRuns.status, 'done'),
+              ),
+            ),
+        )
+      : new Map<string, number>();
 
     const now = Date.now();
     return rows.map((r) => {
       const review = latestReviewByPr.get(r.id);
+      const findingRows = review ? findingsByReview.get(review.id) ?? [] : [];
       return {
         id: r.id,
         number: r.number,
@@ -153,6 +203,20 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         opened_at: r.openedAt?.toISOString() ?? null,
         updated_at: r.updatedAt?.toISOString() ?? null,
         score: review ? review.score : null,
+        cost_usd: costByPr.get(r.id) ?? null,
+        findings: review ? rollupSeverities(findingRows) : null,
+        findings_preview: review
+          ? previewFindings(findingRows).map((f) => ({
+              id: f.id,
+              severity: f.severity as Finding['severity'],
+              category: f.category as Finding['category'],
+              title: f.title,
+              file: f.file,
+              start_line: f.startLine,
+              confidence: f.confidence,
+              rationale: f.rationale,
+            }))
+          : null,
       };
     });
   });

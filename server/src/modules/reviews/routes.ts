@@ -9,7 +9,7 @@ import { ReviewService } from './service.js';
 
 /**
  * reviews module.
- *   POST   /pulls/:id/review  {agentId} | {all:true}  → run review(s); returns runs
+ *   POST   /pulls/:id/review  {agentId} | {all:true} | {agentIds:[]}  → run review(s); returns runs
  *   GET    /runs/:id/events                            → SSE stream of RunEvent (replay-first)
  *   GET    /runs/:id/trace                             → the single-document RunTrace
  *   GET    /pulls/:id/reviews                          → persisted reviews + findings for a PR
@@ -33,6 +33,7 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
     const targets = await service.resolveTargets(workspaceId, {
       ...(body.agentId !== undefined ? { agentId: body.agentId } : {}),
       ...(body.all !== undefined ? { all: body.all } : {}),
+      ...(body.agentIds !== undefined ? { agentIds: body.agentIds } : {}),
     });
     const { runs, reviews } = await service.runReview(
       workspaceId,

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { Provider } from './knowledge.js';
+import { Finding } from './findings.js';
 
 /**
  * Platform / scaffolding DTOs owned by F1:
@@ -170,6 +171,36 @@ export const PrMeta = z.object({
   updated_at: z.string().nullish(),
   // Latest-review score (list endpoint only; null/absent until reviewed).
   score: z.number().int().nullish(),
+  // Total cost (USD) of EVERY successful run for this PR, all-time (list
+  // endpoint only). null/absent when the PR has no priced run yet; UI shows
+  // "—", not "$0".
+  cost_usd: z.number().nullish(),
+  // Severity tally of the LATEST review's findings (list endpoint only).
+  // null/absent until reviewed.
+  findings: z
+    .object({
+      critical: z.number().int(),
+      warning: z.number().int(),
+      suggestion: z.number().int(),
+    })
+    .nullish(),
+  // Read-only previews of the latest review's findings, severity-first then
+  // confidence-desc, capped — what the row's "N FINDINGS IN THIS RUN" popover
+  // shows. null/absent until reviewed.
+  findings_preview: z
+    .array(
+      Finding.pick({
+        id: true,
+        severity: true,
+        category: true,
+        title: true,
+        file: true,
+        start_line: true,
+        confidence: true,
+        rationale: true,
+      }),
+    )
+    .nullish(),
 });
 export type PrMeta = z.infer<typeof PrMeta>;
 
@@ -259,6 +290,9 @@ export type IndexStatus = z.infer<typeof IndexStatus>;
 export const RunRequest = z.object({
   agentId: z.string().optional(),
   all: z.boolean().optional(),
+  /** Run a hand-picked subset of agents (multi-select). Mutually exclusive
+   *  with `agentId`/`all` in practice — the route checks `agentIds` first. */
+  agentIds: z.array(z.string()).optional(),
 });
 export type RunRequest = z.infer<typeof RunRequest>;
 

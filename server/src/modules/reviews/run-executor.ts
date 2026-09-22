@@ -80,6 +80,7 @@ export class ReviewRunExecutor {
             durationMs: 0,
             tokensIn: 0,
             tokensOut: 0,
+            costUsd: null,
             findingsCount: 0,
             grounding: '0/0 passed',
             error: msg,
@@ -102,6 +103,20 @@ export class ReviewRunExecutor {
       await failAll(`Failed to load PR diff: ${(err as Error).message}`);
       return;
     }
+
+    // loadDiff() never throws on an empty result (it has its own fallback
+    // chain) — an empty diff for a PR GitHub already told us has changes
+    // means every fallback failed, not that the PR is genuinely empty.
+    // Reviewing an empty diff silently produces a confidently-wrong
+    // approve/0-findings result, so fail loudly instead — same path as a
+    // real pre-work throw above.
+    if (diff.files.length === 0 && pull.filesCount > 0) {
+      const msg = `Could not load a non-empty diff for this PR (GitHub reports ${pull.filesCount} changed file(s)) — try refreshing the repo.`;
+      runLog.error(msg);
+      await failAll(msg);
+      return;
+    }
+
     runLog.info(`Diff ready — ${diff.files.length} changed file(s); starting ${jobs.length} agent run(s)`);
 
     for (const { agent, runId } of jobs) {
@@ -210,7 +225,10 @@ export class ReviewRunExecutor {
           if (this.container.runBus.isCancelled(runId)) throw new RunCancelledError();
         },
       });
-      const { tokensIn, tokensOut, grounding } = outcome;
+      // costUsd comes straight off the engine's outcome — the provider already
+      // billed it (OpenRouter's real `usage.cost`, else the price book). Never
+      // recompute it here: that would cost an extra call and could disagree.
+      const { tokensIn, tokensOut, costUsd, grounding } = outcome;
 
       const keptFindings = outcome.review.findings;
 
@@ -245,6 +263,7 @@ export class ReviewRunExecutor {
         durationMs,
         tokensIn,
         tokensOut,
+        costUsd,
         findingsCount: findingRows.length,
         grounding,
         score: outcome.review.score,
@@ -265,6 +284,7 @@ export class ReviewRunExecutor {
           duration_ms: durationMs,
           tokens_in: tokensIn,
           tokens_out: tokensOut,
+          cost_usd: costUsd,
           findings: findingRows.length,
           grounding,
         },
@@ -300,6 +320,7 @@ export class ReviewRunExecutor {
           durationMs: Date.now() - start,
           tokensIn: 0,
           tokensOut: 0,
+          costUsd: null,
           findingsCount: 0,
           grounding: '0/0 passed',
           error: msg,
@@ -421,7 +442,7 @@ export class ReviewRunExecutor {
         pr: pull.number,
         source: 'local',
       },
-      stats: { duration_ms: durationMs, tokens_in: 0, tokens_out: 0, findings: 0, grounding },
+      stats: { duration_ms: durationMs, tokens_in: 0, tokens_out: 0, cost_usd: null, findings: 0, grounding },
       prompt_assembly: { system: agent.systemPrompt, skills: null, memory: null, specs: null, user: '' },
       tool_calls: [],
       raw_output: '',

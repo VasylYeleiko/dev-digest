@@ -30,4 +30,38 @@ describe("VerdictBanner (smoke)", () => {
     expect(screen.getByText("42")).toBeInTheDocument();
     expect(screen.getByText(/1 findings · 1 blockers/)).toBeInTheDocument();
   });
+
+  it("shows the run's cost and token totals when the run is priced", () => {
+    renderWithIntl(
+      <VerdictBanner
+        verdict="request_changes"
+        summary={null}
+        score={42}
+        findingsCount={1}
+        blockers={1}
+        costUsd={0.014}
+        tokensIn={8200}
+        tokensOut={1300}
+      />,
+    );
+    expect(screen.getByText(/\$0\.014 · 8k→1\.3k/)).toBeInTheDocument();
+  });
+
+  it("shows nothing in the cost slot when the run is un-priced", () => {
+    renderWithIntl(
+      <VerdictBanner
+        verdict="approve"
+        summary={null}
+        score={95}
+        findingsCount={0}
+        blockers={0}
+        costUsd={null}
+        tokensIn={8200}
+        tokensOut={1300}
+      />,
+    );
+    // Absent entirely — not a "—" placeholder, and never "$0.00".
+    expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
+    expect(screen.queryByText("—")).not.toBeInTheDocument();
+  });
 });
