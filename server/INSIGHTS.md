@@ -210,6 +210,16 @@ Evidence: `src/vendor/shared/contracts/trace.ts`, `src/platform/trace-builder.ts
 
 ## Recurring Errors & Fixes
 
+### 2026-09-26 — `edgesWritten: 0` + every `file_rank.rank` = 1/N on Windows was a path-separator mismatch
+
+`DepCruiseGraph` normalised cruise paths with bare `relative()` (`src\a.ts`) while
+`walkClone` (`src/adapters/fs/local-source-files.ts`) emits `src/a.ts`, so the
+`fileSet.has(from)` filter dropped all ~500 resolved edges — no throw, so no
+`graphFailed` in `repo_index_state.stats`, just a flat PageRank. Any repo-relative
+path compared against `walk.files` must go through `.split(sep).join('/')`; now
+`toRepoRel()` in `src/adapters/depgraph/index.ts`, guarded by `test/depgraph.test.ts`
+(uses `path.win32`, so it fails on Linux CI too).
+
 ### 2026-09-26 — fresh checkout/worktree: `pnpm typecheck` fails in `../reviewer-core/src/**` until reviewer-core has its own `node_modules`
 
 `tsconfig.json`'s path alias compiles `@devdigest/reviewer-core` from source, and
@@ -267,3 +277,11 @@ No entries yet beyond what's already inlined as gotchas in `CLAUDE.md`
 (migrate-on-boot, repo-map cache staleness, `INJECTION_GUARD`).
 
 ## Open Questions
+
+### 2026-09-26 — depgraph never resolves per-package tsconfig aliases in multi-package repos
+
+`DepCruiseGraph` only passes `<root>/tsconfig.json`, which doesn't exist in a
+multi-package clone like dev-digest itself, so ~75 `@devdigest/*` / `@/…` imports
+stay `couldNotResolve` and `vendor/shared` / `ui` are under-ranked. Relative and
+`.js`→`.ts` specifiers resolve fine. Open: cruise per nearest-`tsconfig.json` group?
+Evidence: `src/adapters/depgraph/index.ts` (`tsConfigPath`).
