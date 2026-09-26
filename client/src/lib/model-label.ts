@@ -28,6 +28,19 @@ export function modelLabel(m: PricedModel): string {
   return parts.length ? `${m.id} — ${parts.join(" · ")}` : m.id;
 }
 
+/** A model picker option: a bare id, or an id with a rich label. */
+export type ModelOption = string | { value: string; label: string };
+
+/**
+ * Make sure the currently selected model is selectable even when it isn't in
+ * the live list (a registry default, a retired model, an empty list): returns
+ * the options with `current` prepended if missing. Never mutates `options`.
+ */
+export function withCurrentOption(options: ModelOption[], current: string): ModelOption[] {
+  const present = options.some((o) => (typeof o === "string" ? o : o.value) === current);
+  return present ? options : [current, ...options];
+}
+
 /** Build SearchableSelect/SelectInput options: priced models get a rich label. */
 export function toModelOptions(
   models: PricedModel[] | undefined,

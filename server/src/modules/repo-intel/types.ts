@@ -9,8 +9,9 @@
  * Adapted to real code:
  *   - `repos.id` is a `uuid`, so every `repoId` here is a `string`.
  *   - facade-level rows (SymbolRow / SignatureRow / RefRow) mirror the read model.
- *   - adapter-level extraction types live with the astgrep adapter and stay
- *     compatible with `adapters/codeindex/extract.ts` (ExtractedSymbol/Reference).
+ *   - parser-level extraction types (ParsedSymbol / ParsedReference, supersets
+ *     of ExtractedSymbol / ExtractedReference) are the `CodeParser` port's, in
+ *     `@devdigest/shared`.
  *
  * DEGRADED CONTRACT (lead decision — resolves the read-model vs degraded-contract ambiguity):
  *   - Object-returning methods carry an inline `degraded?: boolean` (+ optional

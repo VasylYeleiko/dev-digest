@@ -4,7 +4,7 @@ Append-only log of gotchas, decisions, and "why is it done this way" notes for
 this package. Newest entry on top within each section, dated. Entries are only
 ever added — a superseded note is corrected by a new dated entry, never edited
 in place. When a note here turns out to be load-bearing for every session,
-promote its one-line summary into [`CLAUDE.md`](CLAUDE.md) instead of leaving it
+promote its one-line summary into [`AGENTS.md`](AGENTS.md) instead of leaving it
 buried.
 
 Written by the `engineering-insights` skill. Format:
@@ -13,6 +13,53 @@ Written by the `engineering-insights` skill. Format:
 ## What Works
 
 ## What Doesn't Work
+
+### 2026-09-26 — never diff a version against the skill's CURRENT body — diff against the PREVIOUS version instead
+
+`VersionsTab`'s "Diff" button used to call `diffLines(pastVersion.body, skill.body)` — comparing every past version to whatever the skill's body is *right now*. For the current version that's a no-op diff (body vs. itself, always empty), and for older versions it shows "everything that changed since today" rather than what that specific save actually changed. `useSkillVersions` returns versions newest-first (server `ORDER BY version DESC`), so the correct predecessor is simply `versions[i + 1]`; the oldest version has no predecessor and gets no Diff button at all. Evidence: `src/app/skills/[id]/_components/SkillEditor/_components/VersionsTab/VersionsTab.tsx`.
+
+### 2026-09-26 — `vendor/ui`'s `Checkbox` has no `disabled` prop — omit `onChange` to make clicks a no-op
+
+`Checkbox` (`vendor/ui/kit/Checkbox.tsx`) always calls `onChange?.(!checked)` on click and has no `disabled` styling/logic of its own. `vendor/ui` is do-not-touch (see the 2026-09-20 Dropdown entry below for the same constraint), so to make one row's checkbox unclickable, pass `onChange={undefined}` instead of a handler — the click then no-ops safely. Note the wrapping `<label>` still shows a pointer cursor and the checkbox still visually toggles focus outlines; pair it with a dimmed row (`opacity`) so it *reads* as disabled too. Evidence: `src/app/agents/[id]/_components/AgentEditor/_components/SkillsTab/SkillsTab.tsx` (a disabled-and-not-yet-linked skill's checkbox).
+
+### 2026-09-25 — corrects the 2026-09-24 entry below: don't strip `.js` extensions from `vendor/shared` — use `next.config.mjs`'s `webpack.resolve.extensionAlias` instead
+
+Stripping `.js` from the client's relative exports (as the entry below
+describes) does fix `next build`/`next dev`, but it makes `client/src/vendor/shared/contracts/*.ts`
+byte-different from the server source — `pr-self-review`'s `shared-mirror`
+check (and `client.yml` CI's `diff -r … contracts`) flags every such file as a
+CRITICAL "contract mirror drifted", and that's a `source: "check"` finding —
+`accepted.json` cannot waive it. The correct fix keeps `.js` extensions
+everywhere (server and client byte-identical, as intended) and instead teaches
+webpack the same `.js`→`.ts` extension mapping tsc's `moduleResolution:
+"Bundler"` already does, via `client/next.config.mjs`:
+```js
+webpack: (config) => {
+  config.resolve.extensionAlias = { ...config.resolve.extensionAlias, ".js": [".ts", ".tsx", ".js"] };
+  return config;
+},
+```
+Evidence: `client/next.config.mjs`.
+
+### 2026-09-24 — client `vendor/shared` relative exports must NOT use `.js` extensions — they break `next build`/`next dev` the moment any file does a real (non-type) import
+
+Every `@devdigest/shared` import in this package was `import type` until this
+session — SWC elides type-only imports entirely, so webpack never actually had
+to resolve `client/src/vendor/shared/index.ts` as a real module. The barrel's
+exports used `.js` extensions (`export * from './contracts/findings.js'`,
+needed for the server copy's Node/tsx ESM execution) which webpack's bundler
+resolution does not follow the way tsc's `moduleResolution: "Bundler"` does —
+the FIRST real value import (`import { SkillType } from "@devdigest/shared"`,
+needed for `.options`) broke `next build`/`next dev` for the WHOLE app with
+"Module not found: Can't resolve './contracts/findings.js'", not just the
+importing route. Invisible to `pnpm typecheck` (tsc resolves fine) and `pnpm
+test` (vite resolves fine) — only a real `next build`/`next dev` catches it,
+and CI never runs `next build`. Fix: `client/src/vendor/shared/index.ts` AND
+every internal relative import inside `client/src/vendor/shared/contracts/*.ts`
+must be extensionless (`export * from './contracts/findings'`); the server
+copies keep `.js` — Node ESM/tsx needs it there, so the two are correctly NOT
+byte-identical on this point. Evidence: `client/src/vendor/shared/index.ts`,
+`client/src/vendor/shared/contracts/{eval-ci,platform,observability,productionize,review-api}.ts`.
 
 ### 2026-09-20 — `vendor/ui`'s `Dropdown` can't host a checkbox / multi-select row
 
@@ -27,6 +74,17 @@ class) but with your own `open` state + outside-click listener. Evidence:
 `src/app/repos/[repoId]/pulls/[number]/_components/RunReviewDropdown/RunReviewDropdown.tsx`.
 
 ## Codebase Patterns
+
+### 2026-09-23 — a component rendered once per review run must not own a bare `window` keydown listener
+
+`ReviewRunAccordion` renders one `FindingsPanel` per expanded run, so a
+`window.addEventListener("keydown", …)` inside the panel fires N times per key:
+one `a` accepted the focused finding in EVERY open run. Shortcut ownership now
+goes through `useShortcutOwner()` (first mounted panel owns the keys; a
+pointer/focus inside another panel claims them; the next panel takes over on
+unmount) — reuse it for any new per-run keyboard shortcut. Evidence:
+`src/app/repos/[repoId]/pulls/[number]/_components/FindingsPanel/activePanel.ts`,
+the "several panels open" tests in `FindingsPanel.test.tsx`.
 
 ### 2026-09-20 — `SeverityBadge compact` renders icon + count with NO label at all — needs its own `aria-label` for a11y and for deterministic browser-automation locators
 
@@ -69,6 +127,25 @@ the run was deleted. Reading the names instead of the prop types silently yields
 
 ## Tool & Library Notes
 
+### 2026-09-24 — jsdom has no `File.prototype.arrayBuffer()` — use `FileReader.readAsArrayBuffer` for client-side file reads in tests
+
+Calling `file.arrayBuffer()` throws `TypeError: file.arrayBuffer is not a
+function` in this package's vitest+jsdom environment, silently swallowed by
+any surrounding try/catch (e.g. an import mutation's error handler), so a
+file-upload flow just looks like it never fired instead of erroring visibly.
+`FileReader.readAsArrayBuffer` works identically in jsdom and every real
+browser — use it for any client-side file→bytes conversion. Evidence:
+`client/src/app/skills/_components/AddSkillDrawer/helpers.ts` (`fileToBase64`).
+
+### 2026-09-23 — jsdom has no `isContentEditable`, so contentEditable guards can't be tested in vitest
+
+`element.isContentEditable` is `undefined` in jsdom even after
+`el.contentEditable = "true"`, so `isTextInput()` (`components/app-shell/helpers.ts`)
+returns false there and a test "typing in a contentEditable doesn't trigger the
+shortcut" fails although the browser behaves correctly. Assert the guard with a
+`<textarea>`/`<input>` instead, and don't "fix" the helper to satisfy jsdom.
+Evidence: `FindingsPanel.test.tsx` ("ignores Ctrl/Cmd combos and typing in a text field").
+
 ### 2026-09-19 — RTL `getByText` can't match a Badge's label+count as one string
 
 `SeverityBadge`/`Badge` (`vendor/ui/primitives/Badge.tsx`) render a count in a
@@ -81,6 +158,16 @@ Evidence: `src/app/repos/[repoId]/pulls/[number]/_components/FindingsPanel/Findi
 (`pillCount` helper).
 
 ## Decisions
+
+### 2026-09-23 — moving UI strings into `messages/en/*.json` must keep the English byte-identical: e2e flows wait on exact text
+
+The agent-browser flows locate by visible text — `04-pr-findings.flow.json`
+waits for `request changes` and `2 findings` in the review-run accordion
+header. When i18n-ing a component, copy the literal value (plurals as ICU:
+`{count, plural, one {# finding} other {# findings}}` renders the same
+string) and don't "improve" wording or casing in the same change. The
+accordion's verdict badge still renders `verdict.replace("_", " ")` for this
+reason. Evidence: `ReviewRunAccordion.test.tsx` pins the e2e strings.
 
 ## Recurring Errors & Fixes
 

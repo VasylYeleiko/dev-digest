@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { RepoIntelService } from '../src/modules/repo-intel/service.js';
-import type { RepoBasics } from '../src/modules/repo-intel/repository.js';
+import type { RepoBasics, RepoIntelStore } from '../src/modules/repo-intel/ports.js';
 import type { IndexState } from '../src/modules/repo-intel/types.js';
 
 /**
@@ -11,8 +11,8 @@ import type { IndexState } from '../src/modules/repo-intel/types.js';
  * blast, hooks) downgrade to their pre-T1.3 behavior on these returns; if any
  * method threw or returned malformed shape, every consumer would crash.
  *
- * No Postgres, no clone. The service's `repo` (RepoIntelRepository) is patched
- * to return null/[] so we exercise the degraded paths cleanly.
+ * No Postgres, no clone. The service's `store` port is a stub returning
+ * null/[] so we exercise the degraded paths cleanly.
  */
 
 function buildDegradedService(opts: {
@@ -20,24 +20,32 @@ function buildDegradedService(opts: {
   basics?: RepoBasics | null;
   indexStateRow?: IndexState | null;
 }): RepoIntelService {
-  const container = {
-    config: { repoIntelEnabled: opts.flag },
-    db: {} as never,
-    // codeIndex is reached by getBlastRadius; we stub minimal behaviour.
-    codeIndex: {
-      symbols: async () => [],
-      references: async () => [],
-    } as never,
-  } as never;
-  const svc = new RepoIntelService(container);
-  (svc as unknown as { repo: Record<string, unknown> }).repo = {
+  const store = {
     getRepoBasics: async () => opts.basics ?? null,
     tryGetIndexState: async () => opts.indexStateRow ?? null,
     getCachedSymbols: async () => [],
     getCachedSymbolsForFiles: async () => [],
     getCachedReferencesTo: async () => [],
-  };
-  return svc;
+  } as unknown as RepoIntelStore;
+  // Only the ports the degraded paths can reach are stubbed; the rest are
+  // never touched when the flag is off / the repo has no clone.
+  return new RepoIntelService({
+    store,
+    enabled: opts.flag,
+    // codeIndex is reached by getBlastRadius; we stub minimal behaviour.
+    codeIndex: {
+      symbols: async () => [],
+      references: async () => [],
+    } as never,
+    git: {} as never,
+    jobs: {} as never,
+    repos: {} as never,
+    parser: {} as never,
+    files: { read: async () => null, walk: async () => ({ files: [], stats: {} }) } as never,
+    depgraph: {} as never,
+    tokenizer: {} as never,
+    indexConcurrency: 1,
+  });
 }
 
 describe('RepoIntel facade — degraded contract (flag off)', () => {
@@ -109,17 +117,17 @@ describe('RepoIntel facade — degraded contract (flag off)', () => {
 
 describe('RepoIntel facade — degraded contract (flag on, but no data)', () => {
   it('getCallerSignatures with no clone → [] (graceful degrade, no throw)', async () => {
-    const svc = buildDegradedService({ flag: true, basics: { id: 'r1', owner: 'a', name: 'b', clonePath: null } });
+    const svc = buildDegradedService({ flag: true, basics: { id: 'r1', owner: 'a', name: 'b', defaultBranch: 'main', clonePath: null } });
     await expect(svc.getCallerSignatures('r1', ['a.ts'])).resolves.toEqual([]);
   });
 
   it('getUnresolvedReferences with no clone → []', async () => {
-    const svc = buildDegradedService({ flag: true, basics: { id: 'r1', owner: 'a', name: 'b', clonePath: null } });
+    const svc = buildDegradedService({ flag: true, basics: { id: 'r1', owner: 'a', name: 'b', defaultBranch: 'main', clonePath: null } });
     await expect(svc.getUnresolvedReferences('r1', ['a.ts'])).resolves.toEqual([]);
   });
 
   it('getCallerSignatures with empty changedFiles → []', async () => {
-    const svc = buildDegradedService({ flag: true, basics: { id: 'r1', owner: 'a', name: 'b', clonePath: '/tmp' } });
+    const svc = buildDegradedService({ flag: true, basics: { id: 'r1', owner: 'a', name: 'b', defaultBranch: 'main', clonePath: '/tmp' } });
     await expect(svc.getCallerSignatures('r1', [])).resolves.toEqual([]);
   });
 });

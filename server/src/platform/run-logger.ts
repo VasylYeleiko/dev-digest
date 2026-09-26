@@ -1,5 +1,4 @@
-import type { RunEventKind, RunLogLine } from '@devdigest/shared';
-import type { RunBus } from './sse.js';
+import type { RunEventBus, RunEventKind, RunLogLine } from '@devdigest/shared';
 
 /**
  * Structured run logger — the SINGLE sink for everything a run does.
@@ -35,7 +34,7 @@ const LEVEL: Record<RunEventKind, keyof PinoLike> = {
 
 export class RunLogger {
   constructor(
-    private readonly bus: RunBus,
+    private readonly bus: RunEventBus,
     private readonly runIds: string[],
     private readonly base?: PinoLike,
     private readonly ctx: Record<string, unknown> = {},

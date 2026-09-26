@@ -4,7 +4,7 @@ Append-only log of gotchas, decisions, and "why is it done this way" notes for
 this package. Newest entry on top within each section, dated. Entries are only
 ever added — a superseded note is corrected by a new dated entry, never edited
 in place. When a note here turns out to be load-bearing for every session,
-promote its one-line summary into [`CLAUDE.md`](CLAUDE.md) instead of leaving it
+promote its one-line summary into [`AGENTS.md`](AGENTS.md) instead of leaving it
 buried.
 
 Written by the `engineering-insights` skill. Format:

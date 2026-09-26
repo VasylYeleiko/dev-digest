@@ -15,7 +15,7 @@ the Phantom-API gate (L06) — by calling `repoIntel.*`, not by re-indexing.
 
 ```mermaid
 flowchart LR
-  CLONE["git clone / fetch"] --> WALK["walk.ts<br/>discover source files"]
+  CLONE["git clone / fetch"] --> WALK["SourceFiles.walk<br/>(adapters/fs) discover source files"]
   WALK --> AST["ast-grep adapter<br/>symbols + references"]
   AST --> EDGES["import graph<br/>(dependency-cruiser)"]
   EDGES --> RANK["rank.ts<br/>PageRank + git hotness → file rank"]
@@ -32,8 +32,9 @@ results rather than throwing).
 
 ## Facade (`repoIntel.*`)
 
-Everything downstream reads through one facade (`service.ts`) so consumers never
-touch the pipeline internals:
+Everything downstream reads through one facade — the `RepoIntel` interface
+from `index.ts`, implemented by `service.ts` and exposed as `container.repoIntel`
+(built by `compose.ts`) — so consumers never touch the pipeline internals:
 
 - `getRepoMap(repoId)` → the cached repo skeleton (fed into the **review prompt**).
 - `getFileRank(repoId, files)` → importance percentile per changed file.

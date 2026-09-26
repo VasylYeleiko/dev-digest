@@ -65,6 +65,27 @@ export interface ToReviewOptions {
   diff?: UnifiedDiff;
 }
 
+/** Fenced blocks (```…```) and inline code spans (`…`) — left verbatim. */
+const CODE_SEGMENT = /(```[\s\S]*?```|`[^`\n]*`)/g;
+
+/**
+ * Model text is untrusted and ends up in a public GitHub review. Outside code,
+ * break `@mentions` (a zero-width space stops GitHub from pinging users/teams)
+ * and escape `<` so raw HTML (tracking images, hidden blocks) renders as text.
+ * Code spans and fences are untouched: GitHub never links mentions there, and
+ * escaping would corrupt suggested code like `Array<string>` or `@Decorator`.
+ */
+export function neutralizeMarkdown(text: string): string {
+  return text
+    .split(CODE_SEGMENT)
+    .map((part, i) =>
+      i % 2 === 1
+        ? part
+        : part.replace(/</g, '&lt;').replace(/(^|[^\w`])@(?=[A-Za-z0-9])/g, '$1@​'),
+    )
+    .join('');
+}
+
 function severityCounts(findings: Finding[]): string {
   const c: Record<string, number> = { CRITICAL: 0, WARNING: 0, SUGGESTION: 0 };
   for (const f of findings) c[f.severity] = (c[f.severity] ?? 0) + 1;
@@ -88,8 +109,8 @@ function composeBody(
   const lines = findings.map((f) => {
     const emoji = SEV_EMOJI[f.severity] ?? '•';
     const loc = `\`${f.file}:${f.start_line}${f.end_line !== f.start_line ? `-${f.end_line}` : ''}\``;
-    const sugg = f.suggestion ? `\n  - _Suggestion:_ ${f.suggestion}` : '';
-    return `- ${emoji} **${f.title}** (${f.severity.toLowerCase()}, ${f.category}) — ${loc}\n  - ${f.rationale}${sugg}`;
+    const sugg = f.suggestion ? `\n  - _Suggestion:_ ${neutralizeMarkdown(f.suggestion)}` : '';
+    return `- ${emoji} **${neutralizeMarkdown(f.title)}** (${f.severity.toLowerCase()}, ${f.category}) — ${loc}\n  - ${neutralizeMarkdown(f.rationale)}${sugg}`;
   });
 
   const summary = `**${findings.length} finding${findings.length === 1 ? '' : 's'}** · ${severityCounts(findings)}`;
@@ -137,8 +158,8 @@ function inlineComments(
     out.push({
       path: f.file,
       line,
-      body: `**${f.title}** (${f.severity.toLowerCase()})\n\n${f.rationale}${
-        f.suggestion ? `\n\n_Suggestion:_ ${f.suggestion}` : ''
+      body: `**${neutralizeMarkdown(f.title)}** (${f.severity.toLowerCase()})\n\n${neutralizeMarkdown(f.rationale)}${
+        f.suggestion ? `\n\n_Suggestion:_ ${neutralizeMarkdown(f.suggestion)}` : ''
       }`,
     });
   }

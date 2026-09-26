@@ -2,7 +2,7 @@
  * repo-intel pipeline — `runFullIndex`.
  *
  * One-pass full index of a repo. Drives:
- *   1. walk + filter           (pipeline/walk.ts)
+ *   1. walk + filter           (SourceFiles port)
  *   2. parse (ast-grep, parallel via p-queue, per-file watchdog) + facts
  *   3. delete-and-rewrite the cached symbols/references for this repo
  *      (idempotent — re-running is safe; UNIQUE constraint guards dup rows)
@@ -19,15 +19,16 @@
  * block is skipped when the soft budget trips, leaving status 'partial'.
  */
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { cpus } from 'node:os';
-import { join } from 'node:path';
 import PQueue from 'p-queue';
-import type { RepoRef } from '@devdigest/shared';
-import type { Container } from '../../../platform/container.js';
+import type {
+  CodeParser,
+  DepGraph,
+  GitClient,
+  RepoRef,
+  SourceFiles,
+  Tokenizer,
+} from '@devdigest/shared';
 import { withTimeout } from '../../../platform/resilience.js';
-import { parseSymbols, parseReferences, langForFile } from '../../../adapters/astgrep/index.js';
-import { extractEndpoints, extractCrons } from '../../../adapters/codeindex/extract.js';
 import {
   DEFAULT_REPO_MAP_TOKEN_BUDGET,
   INDEX_SOFT_BUDGET_MS,
@@ -39,12 +40,23 @@ import type {
   IndexerFileFactsRow,
   IndexerReferenceRow,
   IndexerSymbolRow,
-  RepoIntelRepository,
-} from '../repository.js';
+  RepoIntelStore,
+} from '../ports.js';
 import type { IndexResult, IndexStatus } from '../types.js';
-import { walkClone } from './walk.js';
 import { computeFileRank } from './rank.js';
 import { renderRepoMap } from './repo-map.js';
+
+/** Everything the indexer pipeline needs — all ports, wired in compose.ts. */
+export interface IndexerDeps {
+  store: RepoIntelStore;
+  git: GitClient;
+  parser: CodeParser;
+  files: SourceFiles;
+  depgraph: DepGraph;
+  tokenizer: Tokenizer;
+  /** Parallel file parses (the composition root sizes it from the CPU count). */
+  indexConcurrency: number;
+}
 
 export interface IndexPayload {
   repoId: string;
@@ -69,10 +81,10 @@ const PARSE_DEGRADED_CAP = 50;
  * idempotent on retry.
  */
 export async function runFullIndex(
-  container: Container,
-  repository: RepoIntelRepository,
+  deps: IndexerDeps,
   payload: IndexPayload,
 ): Promise<IndexResult> {
+  const { store: repository, parser } = deps;
   const startedAt = Date.now();
   const repoId = payload.repoId;
 
@@ -94,10 +106,10 @@ export async function runFullIndex(
   }
 
   const ref: RepoRef = { owner: repo.owner, name: repo.name };
-  const currentSha = await safeCurrentHead(container, ref);
+  const currentSha = await safeCurrentHead(deps.git, ref);
 
   // Walk + filter -------------------------------------------------------
-  const walk = await walkClone(repo.clonePath);
+  const walk = await deps.files.walk(repo.clonePath);
   if (walk.files.length === 0) {
     await safePersist(repository, repoId, currentSha, 'partial', 0, walk.stats.skippedTooLarge, {
       ...walk.stats,
@@ -122,8 +134,7 @@ export async function runFullIndex(
   let filesSkipped = walk.stats.skippedTooLarge;
   let softBudgetReached = false;
 
-  const concurrency = Math.max(1, cpus().length - 1);
-  const parseQ = new PQueue({ concurrency });
+  const parseQ = new PQueue({ concurrency: Math.max(1, deps.indexConcurrency) });
 
   for (const relPath of walk.files) {
     // Soft-budget gate: before enqueuing each file, bail out if we've burned
@@ -134,17 +145,14 @@ export async function runFullIndex(
     }
 
     void parseQ.add(async () => {
-      const lang = langForFile(relPath);
-      if (!lang) {
+      if (!parser.supports(relPath)) {
         filesSkipped += 1;
         return;
       }
-      let source: string;
-      try {
-        source = await readFile(join(repo.clonePath!, relPath), 'utf8');
-      } catch (err) {
+      const source = await deps.files.read(repo.clonePath!, relPath);
+      if (source == null) {
         filesSkipped += 1;
-        recordParseDegraded(parseDegraded, relPath, asMessage(err));
+        recordParseDegraded(parseDegraded, relPath, 'unreadable');
         return;
       }
       const contentHash = sha1(source);
@@ -154,8 +162,8 @@ export async function runFullIndex(
       try {
         const parsed = await withTimeout(
           Promise.resolve().then(() => ({
-            symbols: parseSymbols(relPath, source),
-            references: parseReferences(relPath, source),
+            symbols: parser.parseSymbols(relPath, source),
+            references: parser.parseReferences(relPath, source),
           })),
           MAX_PARSE_MS_PER_FILE,
         );
@@ -183,8 +191,8 @@ export async function runFullIndex(
         }
         // Per-file facts (endpoints/crons) so blast reads from file_facts
         // instead of re-parsing the clone (T3 blast migration).
-        const endpoints = extractEndpoints(source);
-        const crons = extractCrons(source);
+        const endpoints = parser.extractEndpoints(source);
+        const crons = parser.extractCrons(source);
         if (endpoints.length > 0 || crons.length > 0) {
           factsBuf.push({ filePath: relPath, endpoints, crons });
         }
@@ -213,7 +221,7 @@ export async function runFullIndex(
   let rankCount = 0;
   if (!softBudgetReached) {
     try {
-      const edges = await container.depgraph.buildEdges(repo.clonePath, walk.files);
+      const edges = await deps.depgraph.buildEdges(repo.clonePath, walk.files);
       edgeRows = edges.map((e) => ({ fromFile: e.from, toFile: e.to }));
     } catch (err) {
       graphFailed = asMessage(err);
@@ -231,7 +239,7 @@ export async function runFullIndex(
 
     // Repo-map render → cache. Drop stale entries (prior SHAs) first.
     const candidates = await repository.getRepoMapCandidates(repoId);
-    const map = renderRepoMap(candidates, container.tokenizer, DEFAULT_REPO_MAP_TOKEN_BUDGET);
+    const map = renderRepoMap(candidates, deps.tokenizer, DEFAULT_REPO_MAP_TOKEN_BUDGET);
     await repository.deleteRepoMapCache(repoId);
     if (currentSha) {
       await repository.putRepoMapCache(
@@ -298,16 +306,16 @@ function sha1(s: string): string {
   return createHash('sha1').update(s).digest('hex');
 }
 
-async function safeCurrentHead(container: Container, ref: RepoRef): Promise<string> {
+async function safeCurrentHead(git: GitClient, ref: RepoRef): Promise<string> {
   try {
-    return await container.git.currentHead(ref);
+    return await git.currentHead(ref);
   } catch {
     return '';
   }
 }
 
 async function safePersist(
-  repository: RepoIntelRepository,
+  repository: RepoIntelStore,
   repoId: string,
   sha: string,
   status: 'partial' | 'degraded',

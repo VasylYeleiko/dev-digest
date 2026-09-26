@@ -97,5 +97,62 @@
     "bodyLabel": "Skill body (Markdown)",
     "bodyHint": "Saving a changed body creates a new immutable version.",
     "version": "v{version}"
+  },
+  "editor": {
+    "runOnEvals": "Run on evals…",
+    "tabs": {
+      "config": "Config",
+      "preview": "Preview",
+      "versions": "Versions",
+      "stats": "Stats",
+      "evals": "Evals"
+    }
+  },
+  "config": {
+    "title": "Configuration",
+    "enabled": "Enabled",
+    "name": "Name",
+    "description": "Description",
+    "descriptionHint": "The skill's directive interface — the description other agents and users see when deciding whether to attach it.",
+    "type": "Type",
+    "body": "Skill body (Markdown)",
+    "filename": "Saved as {filename}",
+    "tokenCount": "~{count} tokens added to the prompt",
+    "unsaved": "Unsaved changes",
+    "save": "Save skill",
+    "saving": "Saving…",
+    "saved": "Saved (v{version})",
+    "savedToast": "Skill saved (v{version})"
+  },
+  "previewTab": {
+    "caption": "Rendered as the reviewing agent receives it."
+  },
+  "versions": {
+    "current": "Current",
+    "versionLabel": "Version {version} · {date}",
+    "diff": "Diff",
+    "hideDiff": "Hide diff",
+    "diffRange": "v{from} → v{to}",
+    "noChanges": "No changes.",
+    "restore": "Restore",
+    "restoring": "Restoring…",
+    "restored": "Restored to v{version} (now v{newVersion})",
+    "reproNote": "Every save snapshots the body so eval runs stay reproducible against the exact text they scored.",
+    "empty": "No versions yet."
+  },
+  "stats": {
+    "usedBy": "Used by",
+    "acceptRate": "Accept rate",
+    "findings30d": "Findings (30d)",
+    "pullFrequency": "Pull frequency",
+    "comingSoon": "Coming soon",
+    "acrossAgents": "Across agents using this skill — an approximation, not per-skill attribution.",
+    "agentsUsing": "Agents using this skill",
+    "noAgents": "No agents use this skill yet.",
+    "findingsByCategory": "Findings by category",
+    "noFindings": "No findings recorded yet."
+  },
+  "evals": {
+    "comingSoon": "Coming soon — no eval runner exists yet."
   }
 }

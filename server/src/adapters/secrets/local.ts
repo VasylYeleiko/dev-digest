@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, chmod } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { SecretsProvider, SecretKey } from '@devdigest/shared';
 
@@ -23,10 +23,14 @@ export class LocalSecretsProvider implements SecretsProvider {
 
   private async load(): Promise<Record<string, string>> {
     if (this.cache) return this.cache;
-    let data: Record<string, string> = {};
+    const data: Record<string, string> = {};
     try {
-      const parsed = JSON.parse(await readFile(this.filePath, 'utf8'));
-      if (parsed && typeof parsed === 'object') data = parsed as Record<string, string>;
+      const parsed: unknown = JSON.parse(await readFile(this.filePath, 'utf8'));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        // Keep only string values — a hand-edited file must not smuggle
+        // non-strings into callers typed as `string | undefined`.
+        for (const [k, v] of Object.entries(parsed)) if (typeof v === 'string') data[k] = v;
+      }
     } catch {
       // Missing or unreadable file → no stored overrides yet.
     }
@@ -44,7 +48,10 @@ export class LocalSecretsProvider implements SecretsProvider {
   async set(key: SecretKey, value: string): Promise<void> {
     const data = await this.load();
     data[key as string] = value;
-    await mkdir(dirname(this.filePath), { recursive: true });
+    await mkdir(dirname(this.filePath), { recursive: true, mode: 0o700 });
     await writeFile(this.filePath, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 });
+    // writeFile's `mode` applies only when it creates the file; re-assert it so
+    // a pre-existing, looser file is tightened on every write.
+    await chmod(this.filePath, 0o600);
   }
 }

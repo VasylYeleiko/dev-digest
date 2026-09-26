@@ -64,4 +64,28 @@ describe('routes (no DB)', () => {
     expect(res.json().error.code).toBe('validation_error');
     await app.close();
   });
+
+  it('an unexpected 5xx never leaks its internal message', async () => {
+    const app = await buildApp({ config });
+    app.get('/__boom', async () => {
+      throw new Error('relation "agent_runs" does not exist');
+    });
+    const res = await app.inject({ method: 'GET', url: '/__boom' });
+    expect(res.statusCode).toBe(500);
+    expect(res.json().error).toEqual({ code: 'internal_error', message: 'Internal error' });
+    await app.close();
+  });
+
+  it('a framework 4xx keeps its client-facing message', async () => {
+    const app = await buildApp({ config });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/settings/test-connection',
+      headers: { 'content-type': 'application/json' },
+      payload: '{not json',
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.message).not.toBe('Internal error');
+    await app.close();
+  });
 });

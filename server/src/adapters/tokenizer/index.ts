@@ -12,10 +12,7 @@
  * mock counter (ContainerOverrides.tokenizer).
  */
 import { getEncoding, type Tiktoken } from 'js-tiktoken';
-
-export interface Tokenizer {
-  count(text: string): number;
-}
+import type { Tokenizer } from '@devdigest/shared';
 
 /** Heuristic fallback used before/instead of a real encoder. */
 export function approxTokens(text: string): number {

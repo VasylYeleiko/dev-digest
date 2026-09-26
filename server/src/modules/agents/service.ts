@@ -1,77 +1,54 @@
-import type { Container } from '../../platform/container.js';
 import type {
   Agent,
   AgentSkillLink,
   AgentVersion,
-  CiFailOn,
+  CreateAgentRequest,
+  LLMProviderResolver,
   ModelInfo,
   Provider,
-  ReviewStrategy,
+  UpdateAgentRequest,
 } from '@devdigest/shared';
-import { AgentsRepository } from './repository.js';
+import type { AgentStore } from './ports.js';
 import { toAgentDto, toAgentVersionDto } from './helpers.js';
+import { ValidationError } from '../../platform/errors.js';
 
 /**
- * A2 — agents service. Business logic for the Agents tab + Agent Editor.
+ * A2 — agents service (ring 2). Business logic for the Agents tab + Agent Editor.
  * Provider/model selection uses the LLM adapter's dynamic model list.
  *
  * An Agent = provider + model + system_prompt + linked skills + output_schema +
  * enabled. Config changes are versioned via `agent_versions` (repository).
  */
 
-// Re-exported for backwards compatibility; implementation lives in ./helpers.
-export { toAgentDto } from './helpers.js';
+/** The wire contracts ARE the service inputs — one definition, validated at the route. */
+export type CreateAgentInput = CreateAgentRequest;
+export type UpdateAgentInput = UpdateAgentRequest;
 
-export interface CreateAgentInput {
-  name: string;
-  description?: string;
-  provider: Provider;
-  model: string;
-  system_prompt: string;
-  output_schema?: unknown;
-  strategy?: ReviewStrategy;
-  ci_fail_on?: CiFailOn;
-  repo_intel?: boolean;
-  enabled?: boolean;
-}
-
-export interface UpdateAgentInput {
-  name?: string;
-  description?: string;
-  provider?: Provider;
-  model?: string;
-  system_prompt?: string;
-  output_schema?: unknown;
-  strategy?: ReviewStrategy;
-  ci_fail_on?: CiFailOn;
-  repo_intel?: boolean;
-  enabled?: boolean;
+export interface AgentsServiceDeps {
+  agents: AgentStore;
+  llm: LLMProviderResolver;
 }
 
 export class AgentsService {
-  private repo: AgentsRepository;
-
-  constructor(private container: Container) {
-    this.repo = new AgentsRepository(container.db);
-  }
+  constructor(private deps: AgentsServiceDeps) {}
 
   async list(workspaceId: string): Promise<Agent[]> {
-    const rows = await this.repo.list(workspaceId);
+    const rows = await this.deps.agents.list(workspaceId);
     return rows.map(toAgentDto);
   }
 
   async get(workspaceId: string, id: string): Promise<Agent | undefined> {
-    const row = await this.repo.getById(workspaceId, id);
+    const row = await this.deps.agents.getById(workspaceId, id);
     return row ? toAgentDto(row) : undefined;
   }
 
   /** Delete an agent (and its versions/skill-links, via cascade). */
   async delete(workspaceId: string, id: string): Promise<boolean> {
-    return this.repo.deleteById(workspaceId, id);
+    return this.deps.agents.deleteById(workspaceId, id);
   }
 
   async create(workspaceId: string, input: CreateAgentInput, userId?: string): Promise<Agent> {
-    const row = await this.repo.insert({
+    const row = await this.deps.agents.insert({
       workspaceId,
       name: input.name,
       description: input.description,
@@ -93,7 +70,7 @@ export class AgentsService {
     id: string,
     patch: UpdateAgentInput,
   ): Promise<Agent | undefined> {
-    const row = await this.repo.update(workspaceId, id, {
+    const row = await this.deps.agents.update(workspaceId, id, {
       ...(patch.name !== undefined ? { name: patch.name } : {}),
       ...(patch.description !== undefined ? { description: patch.description } : {}),
       ...(patch.provider !== undefined ? { provider: patch.provider } : {}),
@@ -114,9 +91,9 @@ export class AgentsService {
    * so version snapshots can't be read across tenants.
    */
   async listVersions(workspaceId: string, agentId: string): Promise<AgentVersion[] | undefined> {
-    const agent = await this.repo.getById(workspaceId, agentId);
+    const agent = await this.deps.agents.getById(workspaceId, agentId);
     if (!agent) return undefined;
-    const rows = await this.repo.listVersions(agentId);
+    const rows = await this.deps.agents.listVersions(agentId);
     return rows.map(toAgentVersionDto);
   }
 
@@ -129,46 +106,66 @@ export class AgentsService {
     agentId: string,
     version: number,
   ): Promise<AgentVersion | undefined> {
-    const agent = await this.repo.getById(workspaceId, agentId);
+    const agent = await this.deps.agents.getById(workspaceId, agentId);
     if (!agent) return undefined;
-    const row = await this.repo.getVersion(agentId, version);
+    const row = await this.deps.agents.getVersion(agentId, version);
     return row ? toAgentVersionDto(row) : undefined;
   }
 
   /** Linked skills for an agent as AgentSkillLink[] (ordered). */
   async skillLinks(agentId: string): Promise<AgentSkillLink[]> {
-    const links = await this.repo.linkedSkills(agentId);
-    return links.map((l) => ({ agent_id: agentId, skill_id: l.skill.id, order: l.order }));
+    const links = await this.deps.agents.linkedSkills(agentId);
+    return links.map((l) => ({ agent_id: agentId, skill_id: l.skillId, order: l.order }));
   }
 
   /**
    * Set / reorder the agent's linked skills. If `skillIds` is provided, replaces
    * the whole set in that order. Returns the resulting ordered links.
+   *
+   * A disabled skill (toggled off on the Skills page) can only appear here if
+   * it was ALREADY linked — attaching a disabled skill for the first time is
+   * rejected, so the UI can't attach what it also renders as unattachable.
    */
   async setSkills(
     workspaceId: string,
     agentId: string,
     skillIds: string[],
   ): Promise<AgentSkillLink[] | undefined> {
-    const agent = await this.repo.getById(workspaceId, agentId);
+    const agent = await this.deps.agents.getById(workspaceId, agentId);
     if (!agent) return undefined;
-    await this.repo.setSkills(agentId, skillIds);
+    const existing = await this.deps.agents.linkedSkills(agentId);
+    const existingIds = new Set(existing.map((l) => l.skillId));
+    const newlyAttached = skillIds.filter((id) => !existingIds.has(id));
+    await this.rejectDisabled(newlyAttached);
+    await this.deps.agents.setSkills(agentId, skillIds);
     return this.skillLinks(agentId);
   }
 
-  /** Link a single skill (append or set order) — additive to existing links. */
+  /** Link a single skill (append or set order) — additive to existing links.
+   *  Rejects a disabled skill unless it's already linked (see `setSkills`). */
   async linkSkill(
     workspaceId: string,
     agentId: string,
     skillId: string,
     order?: number,
   ): Promise<AgentSkillLink[] | undefined> {
-    const agent = await this.repo.getById(workspaceId, agentId);
+    const agent = await this.deps.agents.getById(workspaceId, agentId);
     if (!agent) return undefined;
-    const existing = await this.repo.linkedSkills(agentId);
+    const existing = await this.deps.agents.linkedSkills(agentId);
+    const alreadyLinked = existing.some((l) => l.skillId === skillId);
+    if (!alreadyLinked) await this.rejectDisabled([skillId]);
     const resolvedOrder = order ?? existing.length;
-    await this.repo.linkSkill(agentId, skillId, resolvedOrder);
+    await this.deps.agents.linkSkill(agentId, skillId, resolvedOrder);
     return this.skillLinks(agentId);
+  }
+
+  /** Throws when any of `skillIds` is disabled. */
+  private async rejectDisabled(skillIds: string[]): Promise<void> {
+    if (skillIds.length === 0) return;
+    const disabled = await this.deps.agents.disabledSkillIds(skillIds);
+    if (disabled.length > 0) {
+      throw new ValidationError('Cannot attach a disabled skill', { skill_ids: disabled });
+    }
   }
 
   /**
@@ -177,7 +174,7 @@ export class AgentsService {
    */
   async listModels(provider: Provider): Promise<ModelInfo[]> {
     try {
-      const llm = await this.container.llm(provider);
+      const llm = await this.deps.llm(provider);
       return await llm.listModels();
     } catch {
       return [];

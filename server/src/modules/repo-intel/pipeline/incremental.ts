@@ -14,13 +14,9 @@
  * invalidated and re-rendered. Option B: rank = PageRank, hotness=0.
  */
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { extname, join } from 'node:path';
+import { extname } from 'node:path';
 import type { RepoRef } from '@devdigest/shared';
-import type { Container } from '../../../platform/container.js';
 import { withTimeout } from '../../../platform/resilience.js';
-import { parseSymbols, parseReferences, langForFile } from '../../../adapters/astgrep/index.js';
-import { extractEndpoints, extractCrons } from '../../../adapters/codeindex/extract.js';
 import {
   DEFAULT_REPO_MAP_TOKEN_BUDGET,
   INDEXER_VERSION,
@@ -32,11 +28,9 @@ import type {
   IndexerFileFactsRow,
   IndexerReferenceRow,
   IndexerSymbolRow,
-  RepoIntelRepository,
-} from '../repository.js';
+} from '../ports.js';
 import type { IndexResult, IndexStatus } from '../types.js';
-import { runFullIndex, type IndexPayload } from './full.js';
-import { walkClone } from './walk.js';
+import { runFullIndex, type IndexerDeps, type IndexPayload } from './full.js';
 import { computeFileRank } from './rank.js';
 import { renderRepoMap } from './repo-map.js';
 
@@ -50,10 +44,10 @@ const INCREMENTAL_FULL_THRESHOLD = 300;
 const SUPPORTED_SET: ReadonlySet<string> = new Set(SUPPORTED_EXT);
 
 export async function runIncremental(
-  container: Container,
-  repository: RepoIntelRepository,
+  deps: IndexerDeps,
   payload: IndexPayload,
 ): Promise<IndexResult> {
+  const repository = deps.store;
   const startedAt = Date.now();
   const repoId = payload.repoId;
 
@@ -76,13 +70,13 @@ export async function runIncremental(
   //     bumps whenever the parser/schema changes shape; mixing rows from two
   //     versions would corrupt downstream consumers (step 1).
   if (!state || state.indexerVersion !== INDEXER_VERSION) {
-    return runFullIndex(container, repository, payload);
+    return runFullIndex(deps, payload);
   }
 
   const ref: RepoRef = { owner: repo.owner, name: repo.name };
   let currentSha: string;
   try {
-    currentSha = await container.git.currentHead(ref);
+    currentSha = await deps.git.currentHead(ref);
   } catch (err) {
     return {
       status: 'degraded',
@@ -108,12 +102,12 @@ export async function runIncremental(
   // (3) Compute changed-file intersection.
   let changedAll: string[];
   try {
-    changedAll = await container.git.diffNameOnly(ref, state.lastIndexedSha, currentSha);
+    changedAll = await deps.git.diffNameOnly(ref, state.lastIndexedSha, currentSha);
   } catch (err) {
     // diff failure (shallow clone, missing base, etc.) — fall back to full.
     // The full path is heavier but correct; degrading silently to "no-op" would
     // leave the index drifted from HEAD.
-    return runFullIndex(container, repository, payload);
+    return runFullIndex(deps, payload);
   }
   const changed = changedAll.filter((p) => SUPPORTED_SET.has(extname(p).toLowerCase()));
 
@@ -132,7 +126,7 @@ export async function runIncremental(
 
   // (4) Large diff → cheaper to redo a full index than to slice.
   if (changed.length > INCREMENTAL_FULL_THRESHOLD) {
-    return runFullIndex(container, repository, payload);
+    return runFullIndex(deps, payload);
   }
 
   // (5) Slice path: delete then reparse the changed files.
@@ -144,27 +138,24 @@ export async function runIncremental(
   const parseDegraded: Array<{ file: string; reason: string }> = [];
 
   for (const relPath of changed) {
-    const lang = langForFile(relPath);
-    if (!lang) {
+    if (!deps.parser.supports(relPath)) {
       filesSkipped += 1;
       continue;
     }
-    let source: string;
-    try {
-      source = await readFile(join(repo.clonePath, relPath), 'utf8');
-    } catch (err) {
+    const source = await deps.files.read(repo.clonePath, relPath);
+    if (source == null) {
       // File was deleted between the diff and the read — count as skipped
       // (its old rows still get cleared below).
       filesSkipped += 1;
-      parseDegraded.push({ file: relPath, reason: asMessage(err) });
+      parseDegraded.push({ file: relPath, reason: 'unreadable' });
       continue;
     }
     const contentHash = sha1(source);
     try {
       const parsed = await withTimeout(
         Promise.resolve().then(() => ({
-          symbols: parseSymbols(relPath, source),
-          references: parseReferences(relPath, source),
+          symbols: deps.parser.parseSymbols(relPath, source),
+          references: deps.parser.parseReferences(relPath, source),
         })),
         MAX_PARSE_MS_PER_FILE,
       );
@@ -190,8 +181,8 @@ export async function runIncremental(
           contentHash,
         });
       }
-      const endpoints = extractEndpoints(source);
-      const crons = extractCrons(source);
+      const endpoints = deps.parser.extractEndpoints(source);
+      const crons = deps.parser.extractCrons(source);
       if (endpoints.length > 0 || crons.length > 0) {
         factsBuf.push({ filePath: relPath, endpoints, crons });
       }
@@ -215,8 +206,8 @@ export async function runIncremental(
   let graphFailed: string | undefined;
   let edgeRows: IndexerEdgeRow[] = [];
   try {
-    const allFiles = (await walkClone(repo.clonePath)).files;
-    const edges = await container.depgraph.buildEdges(repo.clonePath, allFiles);
+    const allFiles = (await deps.files.walk(repo.clonePath)).files;
+    const edges = await deps.depgraph.buildEdges(repo.clonePath, allFiles);
     edgeRows = edges.map((e) => ({ fromFile: e.from, toFile: e.to }));
     await repository.replaceEdges(repoId, edgeRows);
     // reset: a changed decl-file can invalidate a prior resolution.
@@ -225,7 +216,7 @@ export async function runIncremental(
     await repository.replaceFileRank(repoId, rankRows);
     // The repo-map is keyed per commit_sha → prior entries are now stale.
     const candidates = await repository.getRepoMapCandidates(repoId);
-    const map = renderRepoMap(candidates, container.tokenizer, DEFAULT_REPO_MAP_TOKEN_BUDGET);
+    const map = renderRepoMap(candidates, deps.tokenizer, DEFAULT_REPO_MAP_TOKEN_BUDGET);
     await repository.deleteRepoMapCache(repoId);
     await repository.putRepoMapCache(
       repoId,

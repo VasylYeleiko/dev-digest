@@ -6,6 +6,9 @@ export const DRAWER_WIDTH = 720;
 /** Live-log stream viewport height (px). */
 export const LOG_HEIGHT = 420;
 
+/** How long the footer's "copied" confirmation stays visible (ms). */
+export const COPIED_FEEDBACK_MS = 1500;
+
 /** Tab keys (Trace / Live log). */
 export const TABS = ["trace", "log"] as const;
 export type TraceTab = (typeof TABS)[number];

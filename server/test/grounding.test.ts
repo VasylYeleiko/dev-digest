@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Finding } from '@devdigest/shared';
 import { groundFindings, groundingSummary } from '../src/platform/grounding.js';
-import { parseUnifiedDiff } from '../src/adapters/git/diff-parser.js';
+import { parseUnifiedDiff } from '../src/platform/diff-parser.js';
 
 const DIFF = `diff --git a/src/config.ts b/src/config.ts
 --- a/src/config.ts
@@ -72,6 +72,22 @@ describe('citation grounding gate', () => {
       [f({ file: 'src/api/users.ts', start_line: 45, end_line: 52, category: 'perf' })],
       diff,
     );
+    expect(res.kept).toHaveLength(1);
+  });
+
+  it('a model-supplied huge range is checked in hunk-size time, not range-size time', () => {
+    const started = Date.now();
+    const res = groundFindings(
+      [
+        // misses every hunk: would be ~2e9 iterations if the range were walked
+        f({ file: 'src/config.ts', start_line: 1000, end_line: 2_000_000_000 }),
+        // inverted, still intersects line 11
+        f({ file: 'src/config.ts', start_line: 2_000_000_000, end_line: 11 }),
+      ],
+      diff,
+    );
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(res.dropped).toHaveLength(1);
     expect(res.kept).toHaveLength(1);
   });
 

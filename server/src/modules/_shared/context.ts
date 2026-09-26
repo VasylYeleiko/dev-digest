@@ -1,23 +1,26 @@
 import type { FastifyRequest } from 'fastify';
-import type { Container } from '../../platform/container.js';
+import type { AuthProvider } from '@devdigest/shared';
 
 export interface RequestContext {
   workspaceId: string;
   userId: string;
 }
 
+export type RequestContextResolver = (req: FastifyRequest) => Promise<RequestContext>;
+
 /**
- * Resolve the tenancy context for a request via the AuthProvider. In MVP
- * (LocalNoAuthProvider) this always returns the default workspace + system user.
- * Every module uses this so workspace scoping is never forgotten.
+ * Build the per-request tenancy resolver from the AuthProvider port. A module's
+ * routes plugin creates it once while wiring (`requestContext(app.container.auth)`),
+ * and every handler calls it first — so workspace scoping is never forgotten
+ * and handlers never reach into the container. In the MVP
+ * (LocalNoAuthProvider) it always yields the default workspace + system user.
  */
-export async function getContext(
-  container: Container,
-  req: FastifyRequest,
-): Promise<RequestContext> {
-  const [user, workspace] = await Promise.all([
-    container.auth.currentUser(req),
-    container.auth.currentWorkspace(req),
-  ]);
-  return { workspaceId: workspace.id, userId: user.id };
+export function requestContext(auth: AuthProvider): RequestContextResolver {
+  return async (req) => {
+    const [user, workspace] = await Promise.all([
+      auth.currentUser(req),
+      auth.currentWorkspace(req),
+    ]);
+    return { workspaceId: workspace.id, userId: user.id };
+  };
 }

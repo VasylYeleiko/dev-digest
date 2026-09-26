@@ -21,16 +21,7 @@
  * import/export-from lines) so the blast graph stays trustworthy.
  */
 
-export interface ExtractedSymbol {
-  name: string;
-  kind: string;
-  line: number;
-}
-
-export interface ExtractedReference {
-  toSymbol: string;
-  line: number;
-}
+import type { ExtractedReference, ExtractedSymbol } from '@devdigest/shared';
 
 const LINE_COMMENT = /^\s*(\/\/|\*|\/\*)/;
 const IMPORT_LINE = /^\s*import\s|^\s*export\s+\{[^}]*\}\s+from\b|^\s*export\s+\*\s+from\b/;

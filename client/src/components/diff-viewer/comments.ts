@@ -1,6 +1,7 @@
 /* Inline-comment support for the DiffViewer (Files changed tab).
-   Pure helpers + the API shape the viewer needs; React bits live in
-   DiffComments.tsx. Comments are GitHub PR review comments, proxied live. */
+   Pure helpers + the API shape the viewer needs; the React parts live in
+   CommentCard/, CommentThreadView/, InlineComposer/ and OutdatedComments/.
+   Comments are GitHub PR review comments, proxied live. */
 import type { CSSProperties } from "react";
 import type { PrReviewComment } from "../../lib/types";
 import type { Line } from "./helpers";

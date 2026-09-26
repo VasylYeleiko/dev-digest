@@ -6,6 +6,11 @@ import type {
   CodeIndex,
   Embedder,
   LLMProvider,
+  LLMProviderId,
+  CodeParser,
+  SourceFiles,
+  DepGraph,
+  Tokenizer,
 } from '@devdigest/shared';
 import type { AppConfig } from './config.js';
 import type { Db } from '../db/client.js';
@@ -23,19 +28,24 @@ import { OpenRouterProvider } from '@devdigest/reviewer-core';
 import { estimateCost } from '../adapters/llm/pricing.js';
 import { PriceBook } from './price-book.js';
 import { ConfigError } from './errors.js';
-import { AgentsRepository } from '../modules/agents/repository.js';
-import { ReviewRepository } from '../modules/reviews/repository.js';
-import type { RepoIntel } from '../modules/repo-intel/types.js';
-import { RepoIntelService } from '../modules/repo-intel/service.js';
-import { type DepGraph, DepCruiseGraph } from '../adapters/depgraph/index.js';
-import { type Tokenizer, TiktokenTokenizer } from '../adapters/tokenizer/index.js';
+import type { RepoIntel } from '../modules/repo-intel/index.js';
+import { createRepoIntelService } from '../modules/repo-intel/compose.js';
+import { DepCruiseGraph } from '../adapters/depgraph/index.js';
+import { TiktokenTokenizer } from '../adapters/tokenizer/index.js';
+import { AstGrepCodeParser } from '../adapters/astgrep/index.js';
+import { LocalSourceFiles } from '../adapters/fs/local-source-files.js';
 
 /**
- * DI container. One per app instance. Holds config, db, the JobRunner,
- * the SSE bus, and lazily-constructed adapters resolved through SecretsProvider.
+ * DI container — the composition root for shared infrastructure (ring 4). One
+ * per app instance. Holds config, db, the job queue, the run event bus, and
+ * lazily-constructed adapters resolved through SecretsProvider, plus the one
+ * cross-module facade (`repoIntel`).
  *
- * Tests construct a container with `overrides` to inject mock adapters; the
- * Services depend on these interfaces, not the concrete classes.
+ * Module services are NOT built here: each module's `compose.ts` builds its
+ * own repository + service from this container and hands the service only the
+ * ports it needs. Services never see the container itself.
+ *
+ * Tests construct a container with `overrides` to inject mock adapters.
  */
 export interface ContainerOverrides {
   secrets?: SecretsProvider;
@@ -51,6 +61,8 @@ export interface ContainerOverrides {
   /** repo-intel T3 adapters — only the indexer pipeline reads these. */
   depgraph?: DepGraph;
   tokenizer?: Tokenizer;
+  codeParser?: CodeParser;
+  sourceFiles?: SourceFiles;
 }
 
 export class Container {
@@ -67,14 +79,11 @@ export class Container {
   private _embedder?: Embedder;
   private llmCache = new Map<string, LLMProvider>();
 
-  // Shared repositories for cross-cutting entities (agents, reviews/pulls,
-  // runs). Constructed here, in the composition root, so consuming modules use
-  // `container.agentsRepo` instead of reaching into another module's folder.
-  private _agentsRepo?: AgentsRepository;
-  private _reviewRepo?: ReviewRepository;
   private _repoIntel?: RepoIntel;
   private _depgraph?: DepGraph;
   private _tokenizer?: Tokenizer;
+  private _codeParser?: CodeParser;
+  private _sourceFiles?: SourceFiles;
   private _priceBook?: PriceBook;
 
   constructor(config: AppConfig, db: Db, private overrides: ContainerOverrides = {}) {
@@ -88,16 +97,10 @@ export class Container {
 
   get git(): GitClient {
     if (this.overrides.git) return this.overrides.git;
-    this._git ??= new SimpleGitClient(this.config.cloneDir);
+    this._git ??= new SimpleGitClient(this.config.cloneDir, () =>
+      this.secrets.get('GITHUB_TOKEN'),
+    );
     return this._git;
-  }
-
-  get agentsRepo(): AgentsRepository {
-    return (this._agentsRepo ??= new AgentsRepository(this.db));
-  }
-
-  get reviewRepo(): ReviewRepository {
-    return (this._reviewRepo ??= new ReviewRepository(this.db));
   }
 
   get codeIndex(): CodeIndex {
@@ -113,7 +116,7 @@ export class Container {
    */
   get repoIntel(): RepoIntel {
     if (this.overrides.repoIntel) return this.overrides.repoIntel;
-    this._repoIntel ??= new RepoIntelService(this);
+    this._repoIntel ??= createRepoIntelService(this);
     return this._repoIntel;
   }
 
@@ -129,6 +132,20 @@ export class Container {
     if (this.overrides.tokenizer) return this.overrides.tokenizer;
     this._tokenizer ??= new TiktokenTokenizer();
     return this._tokenizer;
+  }
+
+  /** Source-code parser (ast-grep + regex extractors). repo-intel only. */
+  get codeParser(): CodeParser {
+    if (this.overrides.codeParser) return this.overrides.codeParser;
+    this._codeParser ??= new AstGrepCodeParser();
+    return this._codeParser;
+  }
+
+  /** Read access to local clones on disk. repo-intel only. */
+  get sourceFiles(): SourceFiles {
+    if (this.overrides.sourceFiles) return this.overrides.sourceFiles;
+    this._sourceFiles ??= new LocalSourceFiles();
+    return this._sourceFiles;
   }
 
   /**
@@ -160,7 +177,7 @@ export class Container {
   }
 
   /** Resolve an LLM provider by id; constructs from the secret key, cached. */
-  async llm(id: 'openai' | 'anthropic' | 'openrouter'): Promise<LLMProvider> {
+  async llm(id: LLMProviderId): Promise<LLMProvider> {
     const injected = this.overrides.llm?.[id];
     if (injected) return injected;
     const cached = this.llmCache.get(id);
@@ -170,7 +187,7 @@ export class Container {
     return provider;
   }
 
-  private async buildLlm(id: 'openai' | 'anthropic' | 'openrouter'): Promise<LLMProvider> {
+  private async buildLlm(id: LLMProviderId): Promise<LLMProvider> {
     // Every provider gets the SAME cost-estimation callback — the PriceBook
     // (live OpenRouter prices, falling back to the static adapters/llm/pricing.ts
     // table). OpenRouter also has a real billed `usage.cost` from its own API

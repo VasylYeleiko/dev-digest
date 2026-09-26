@@ -1,87 +1,76 @@
 "use client";
 
-import React, { useCallback } from "react";
+import React from "react";
+import { useTranslations } from "next-intl";
 import { Icon, Badge, Button, SectionLabel, EmptyState } from "@devdigest/ui";
 import { RunStatus } from "../RunStatus";
-import { RunHistory } from "../RunHistory/RunHistory";
+import { RunHistory } from "../RunHistory";
 import { ReviewRunAccordion } from "../ReviewRunAccordion";
 import { s } from "./styles";
-import type { FindingRecord, ReviewRecord, RunSummary, PrCommit } from "@devdigest/shared";
-import type { UseMutationResult } from "@tanstack/react-query";
+import type { PrCommit } from "@devdigest/shared";
+import { groupFindingsByRun } from "./helpers";
+import {
+  usePrReviews,
+  usePrActiveRuns,
+  usePrRuns,
+  useCancelRun,
+  useDeleteRun,
+  useInvalidateRunState,
+} from "../../../../../../../lib/hooks/reviews";
 
 interface FindingsTabProps {
   prId: string | null;
-  liveRunIds: string[];
-  reviewRunning: boolean;
-  lethalTrifecta: FindingRecord[];
-  runs: ReviewRecord[];
-  prRuns: RunSummary[] | undefined;
   prCommits: PrCommit[];
-  cancelMutation: UseMutationResult<any, any, string, any>;
   /** owner/repo + head sha — used to deep-link a finding's file:line to GitHub. */
   repoFullName?: string | null;
   headSha?: string | null;
   onOpenTrace: (id: string) => void;
-  onDelete: (id: string) => void;
-  onRunDone: () => void;
 }
 
-export function FindingsTab({
-  prId,
-  liveRunIds,
-  reviewRunning,
-  lethalTrifecta,
-  runs,
-  prRuns,
-  prCommits,
-  cancelMutation,
-  repoFullName,
-  headSha,
-  onOpenTrace,
-  onDelete,
-  onRunDone,
-}: FindingsTabProps) {
-  const handleCancelAll = useCallback(() => {
-    liveRunIds.forEach((id) => cancelMutation.mutate(id));
-  }, [liveRunIds, cancelMutation]);
+/**
+ * Findings tab — live runs, timeline and the review-run accordions. Owns its
+ * run data through the reviews hooks (React Query shares the cache with the
+ * page, so nothing is fetched twice).
+ */
+export function FindingsTab({ prId, prCommits, repoFullName, headSha, onOpenTrace }: FindingsTabProps) {
+  const t = useTranslations("prReview");
+  // `runs` are REVIEWS; `prRuns` are the AGENT RUNS (status, cost) — see client/INSIGHTS.md.
+  const { data: reviews, refetch: refetchReviews } = usePrReviews(prId);
+  const runs = React.useMemo(() => reviews ?? [], [reviews]);
+  const { data: activeRuns } = usePrActiveRuns(prId);
+  const { data: prRuns } = usePrRuns(prId);
+  const liveRunIds = (activeRuns ?? []).map((r) => r.run_id);
+  const reviewRunning = liveRunIds.length > 0;
+  const cancel = useCancelRun();
+  const deleteRun = useDeleteRun(prId);
+  const invalidateRunState = useInvalidateRunState(prId);
 
-  const handleOpenFirstTrace = useCallback(() => {
+  const lethalTrifecta = runs.flatMap((r) => r.findings).filter((f) => f.kind === "lethal_trifecta");
+
+  const handleCancelAll = () => liveRunIds.forEach((id) => cancel.mutate(id));
+  const handleOpenFirstTrace = () => {
     if (liveRunIds[0]) onOpenTrace(liveRunIds[0]);
-  }, [liveRunIds, onOpenTrace]);
-
-  const handleOpenTrace = useCallback(
-    (id: string) => {
-      onOpenTrace(id);
-    },
-    [onOpenTrace],
-  );
-
-  const handleDelete = useCallback(
-    (id: string) => {
-      onDelete(id);
-    },
-    [onDelete],
-  );
+  };
+  const handleDelete = (id: string) => {
+    if (window.confirm(t("findingsTab.deleteRunConfirm"))) deleteRun.mutate(id);
+  };
+  // A run settled (done OR failed): refresh live runs, the run history (so a
+  // just-failed run shows up without a reload) and the persisted reviews.
+  const handleRunDone = () => {
+    invalidateRunState.activeRuns();
+    invalidateRunState.history();
+    refetchReviews();
+  };
 
   // Timeline → Review-runs navigation: clicking an agent name in the timeline
   // opens + scrolls to that run's accordion below. The nonce re-triggers the
   // scroll even when the same run is clicked twice.
   const [target, setTarget] = React.useState<{ runId: string; n: number } | null>(null);
-  const handleGoToReview = useCallback((runId: string) => {
+  const handleGoToReview = React.useCallback((runId: string) => {
     setTarget((p) => ({ runId, n: (p?.n ?? 0) + 1 }));
   }, []);
 
-  // `runs` here are REVIEWS, not agent runs (see client/INSIGHTS.md) — join
-  // by run_id to give each timeline row its findings. Appends rather than
-  // overwrites: one run can produce both a `summary` and a `review` row.
-  const findingsByRun = React.useMemo(() => {
-    const map: Record<string, FindingRecord[]> = {};
-    for (const review of runs) {
-      if (!review.run_id) continue;
-      (map[review.run_id] ??= []).push(...review.findings);
-    }
-    return map;
-  }, [runs]);
+  const findingsByRun = React.useMemo(() => groupFindingsByRun(runs), [runs]);
 
   return (
     <section>
@@ -95,39 +84,37 @@ export function FindingsTab({
                   kind="danger"
                   size="sm"
                   icon="X"
-                  loading={cancelMutation.isPending}
+                  loading={cancel.isPending}
                   onClick={handleCancelAll}
                 >
-                  Cancel
+                  {t("findingsTab.cancel")}
                 </Button>
                 <Button kind="ghost" size="sm" icon="FileText" onClick={handleOpenFirstTrace}>
-                  Open run trace
+                  {t("findingsTab.openTrace")}
                 </Button>
               </div>
             }
           >
-            Live review
+            {t("findingsTab.liveReview")}
           </SectionLabel>
-          <RunStatus runIds={liveRunIds} onDone={onRunDone} />
+          <RunStatus runIds={liveRunIds} onDone={handleRunDone} />
         </div>
       )}
 
       {reviewRunning && (
         <div style={s.reviewInProgress}>
           <Icon.RefreshCw size={16} style={{ color: "var(--accent)", animation: "ddspin 1s linear infinite" }} />
-          <span style={s.reviewInProgressText}>Review in progress…</span>
-          <span style={s.reviewInProgressSub}>
-            the agent is analyzing the diff — this can take a while on large PRs.
-          </span>
+          <span style={s.reviewInProgressText}>{t("findingsTab.inProgress")}</span>
+          <span style={s.reviewInProgressSub}>{t("findingsTab.inProgressSub")}</span>
         </div>
       )}
 
       {lethalTrifecta.length > 0 && (
         <div style={s.lethalTrifecta}>
           <Icon.Shield size={16} style={{ color: "var(--crit)" }} />
-          <span style={s.lethalTrifectaTitle}>Lethal Trifecta detected</span>
+          <span style={s.lethalTrifectaTitle}>{t("findingsTab.trifectaTitle")}</span>
           <Badge color="var(--crit)" bg="transparent">
-            {lethalTrifecta.length} finding(s)
+            {t("findingsTab.trifectaCount", { count: lethalTrifecta.length })}
           </Badge>
         </div>
       )}
@@ -136,15 +123,15 @@ export function FindingsTab({
         <div style={s.timelineSection}>
           <SectionLabel
             icon="Activity"
-            right={<span style={{ fontSize: 12, color: "var(--text-muted)" }}>runs &amp; commits · newest first</span>}
+            right={<span style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("findingsTab.timelineHint")}</span>}
           >
-            Timeline
+            {t("findingsTab.timeline")}
           </SectionLabel>
           <RunHistory
             runs={prRuns ?? []}
             commits={prCommits}
             findingsByRun={findingsByRun}
-            onOpenTrace={handleOpenTrace}
+            onOpenTrace={onOpenTrace}
             onGoToReview={handleGoToReview}
             onDelete={handleDelete}
           />
@@ -153,16 +140,16 @@ export function FindingsTab({
 
       <SectionLabel
         icon="AlertOctagon"
-        right={<span style={{ fontSize: 12, color: "var(--text-muted)" }}>grouped by run · newest first</span>}
+        right={<span style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("findingsTab.reviewRunsHint")}</span>}
       >
-        Review runs
+        {t("findingsTab.reviewRuns")}
       </SectionLabel>
       {runs.length === 0 ? (
         reviewRunning || liveRunIds.length > 0 ? null : (
           <EmptyState
             icon="Sparkles"
-            title="No findings yet"
-            body="Run a review to generate findings. Use Run Review ▾ above (run all enabled agents or a specific one)."
+            title={t("findingsTab.emptyTitle")}
+            body={t("findingsTab.emptyBody")}
           />
         )
       ) : (

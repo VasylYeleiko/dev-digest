@@ -18,16 +18,18 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { runFullIndex } from '../src/modules/repo-intel/pipeline/full.js';
 import { runIncremental } from '../src/modules/repo-intel/pipeline/incremental.js';
-import type { RepoIntelRepository } from '../src/modules/repo-intel/repository.js';
+import type { RepoIntelStore } from '../src/modules/repo-intel/ports.js';
+import type { IndexerDeps } from '../src/modules/repo-intel/pipeline/full.js';
+import { AstGrepCodeParser } from '../src/adapters/astgrep/index.js';
+import { LocalSourceFiles } from '../src/adapters/fs/local-source-files.js';
 import { INDEXER_VERSION } from '../src/modules/repo-intel/constants.js';
 import type { IndexState } from '../src/modules/repo-intel/types.js';
-import type { Container } from '../src/platform/container.js';
 
 // ---------------------------------------------------------------------------
-// In-memory repository stub — matches RepoIntelRepository's surface.
+// In-memory store stub — matches the RepoIntelStore port's surface.
 // ---------------------------------------------------------------------------
 
 interface RepoBasics {
@@ -108,18 +110,17 @@ function makeRepoStub(opts: {
     putRepoMapCache: async () => {},
   };
 
-  // The pipeline calls these via the typed repository; the stub satisfies the
-  // structural shape. `unknown as` keeps the test isolated from the class's
-  // private fields without leaking type-erased anys into the pipeline code.
+  // The pipeline calls these via the RepoIntelStore port; the stub satisfies
+  // the structural shape for the methods the pipeline reaches.
   return {
-    repo: stub as unknown as RepoIntelRepository,
+    repo: stub as unknown as RepoIntelStore,
     symbols,
     references,
     getState: () => state,
   };
 }
 
-// Minimal Container — only the fields the pipeline reads.
+// Indexer deps — real parser + filesystem over the tmpdir clone, stubbed git/graph.
 interface MiniGit {
   currentHead: () => Promise<string>;
   diffNameOnly: (
@@ -128,19 +129,21 @@ interface MiniGit {
     head: string,
   ) => Promise<string[]>;
 }
-function makeContainer(git: MiniGit): Container {
+function makeContainer(git: MiniGit): Omit<IndexerDeps, 'store'> {
   return {
-    git,
+    git: git as unknown as IndexerDeps['git'],
+    parser: new AstGrepCodeParser(),
+    files: new LocalSourceFiles(),
     // T3 adapters — stubbed: empty graph (rank degrades to flat) + char/4 tokens.
     depgraph: { buildEdges: async () => [] },
     tokenizer: { count: (text: string) => Math.ceil(text.length / 4) },
-  } as unknown as Container;
+    indexConcurrency: 2,
+  };
 }
 
 async function writeFileAt(root: string, rel: string, contents: string): Promise<void> {
   const full = join(root, rel);
-  const slash = full.lastIndexOf('/');
-  if (slash > 0) await mkdir(full.slice(0, slash), { recursive: true });
+  await mkdir(dirname(full), { recursive: true });
   await writeFile(full, contents);
 }
 
@@ -180,7 +183,7 @@ describe('runFullIndex', () => {
       diffNameOnly: async () => [],
     });
 
-    const result = await runFullIndex(container, stub.repo, { repoId: 'r1' });
+    const result = await runFullIndex({ ...container, store: stub.repo }, { repoId: 'r1' });
 
     // Clean pass (no soft-budget / graph failure / parse errors) → 'full' (T3).
     expect(result.status).toBe('full');
@@ -215,7 +218,7 @@ describe('runFullIndex', () => {
       diffNameOnly: async () => [],
     });
 
-    const result = await runFullIndex(container, stub.repo, { repoId: 'r2' });
+    const result = await runFullIndex({ ...container, store: stub.repo }, { repoId: 'r2' });
     expect(result.status).toBe('degraded');
     expect(result.reason).toBe('no_clone');
 
@@ -231,7 +234,7 @@ describe('runFullIndex', () => {
       diffNameOnly: async () => [],
     });
 
-    const result = await runFullIndex(container, stub.repo, { repoId: 'missing' });
+    const result = await runFullIndex({ ...container, store: stub.repo }, { repoId: 'missing' });
     expect(result.status).toBe('degraded');
     expect(result.reason).toBe('repo_not_found');
     expect(stub.getState()).toBeNull();
@@ -248,7 +251,7 @@ describe('runFullIndex', () => {
       diffNameOnly: async () => [],
     });
 
-    const result = await runFullIndex(container, stub.repo, { repoId: 'r3' });
+    const result = await runFullIndex({ ...container, store: stub.repo }, { repoId: 'r3' });
     expect(result.status).toBe('partial');
     expect(result.filesIndexed).toBe(0);
     expect(result.reason).toBe('no_files');
@@ -296,7 +299,7 @@ describe('runIncremental', () => {
       diffNameOnly: async () => [],
     });
 
-    const result = await runIncremental(container, stub.repo, { repoId: 'r1' });
+    const result = await runIncremental({ ...container, store: stub.repo }, { repoId: 'r1' });
     // Full path on a clean tree → 'full' with the new sha persisted (T3).
     expect(result.status).toBe('full');
     expect(stub.getState()!.lastIndexedSha).toBe('sha-new');
@@ -314,7 +317,7 @@ describe('runIncremental', () => {
       diffNameOnly: async () => [],
     });
 
-    await runIncremental(container, stub.repo, { repoId: 'r1' });
+    await runIncremental({ ...container, store: stub.repo }, { repoId: 'r1' });
     expect(stub.getState()!.indexerVersion).toBe(INDEXER_VERSION);
     expect(stub.getState()!.lastIndexedSha).toBe('sha-new');
   });
@@ -331,7 +334,7 @@ describe('runIncremental', () => {
       },
     });
 
-    const result = await runIncremental(container, stub.repo, { repoId: 'r1' });
+    const result = await runIncremental({ ...container, store: stub.repo }, { repoId: 'r1' });
     expect(result.reason).toBe('sha_unchanged');
     expect(stub.symbols.length).toBe(0);
     expect(stub.references.length).toBe(0);
@@ -350,7 +353,7 @@ describe('runIncremental', () => {
       diffNameOnly: async () => ['README.md', 'package.json'],
     });
 
-    const result = await runIncremental(container, stub.repo, { repoId: 'r1' });
+    const result = await runIncremental({ ...container, store: stub.repo }, { repoId: 'r1' });
     expect(result.reason).toBe('no_supported_changes');
     expect(stub.symbols.length).toBe(0);
     expect(stub.getState()!.lastIndexedSha).toBe('sha-new');
@@ -372,7 +375,7 @@ describe('runIncremental', () => {
       diffNameOnly: async () => ['src/changed.ts'],
     });
 
-    const result = await runIncremental(container, stub.repo, { repoId: 'r1' });
+    const result = await runIncremental({ ...container, store: stub.repo }, { repoId: 'r1' });
     expect(result.status).toBe('partial');
     expect(result.filesIndexed).toBe(1);
     const names = stub.symbols.map((s) => (s as { name: string }).name);
@@ -396,7 +399,7 @@ describe('runIncremental', () => {
       diffNameOnly: async () => changed,
     });
 
-    const result = await runIncremental(container, stub.repo, { repoId: 'r1' });
+    const result = await runIncremental({ ...container, store: stub.repo }, { repoId: 'r1' });
     // Full reindex ran — it walked the real tmpdir (just src/a.ts) and persisted.
     expect(result.status).toBe('full');
     expect(stub.getState()!.lastIndexedSha).toBe('sha-huge');
@@ -420,7 +423,7 @@ describe('runIncremental', () => {
       },
     });
 
-    const result = await runIncremental(container, stub.repo, { repoId: 'r1' });
+    const result = await runIncremental({ ...container, store: stub.repo }, { repoId: 'r1' });
     expect(result.status).toBe('full');
     expect(stub.getState()!.lastIndexedSha).toBe('sha-new');
   });

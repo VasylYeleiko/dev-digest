@@ -9,7 +9,7 @@
 import React from "react";
 import { useTranslations } from "next-intl";
 import { Icon, SEV } from "@devdigest/ui";
-import { SEVERITIES, type FindingSeverity } from "./constants";
+import { SEVERITIES, type FindingSeverity } from "../../severity";
 import { s } from "./styles";
 
 export function SeverityBar({

@@ -52,7 +52,7 @@ inside that provider — `useTranslations` never needs its own fetch.
 Feature logic never lives in `page.tsx` itself. It lives in a colocated
 `_components/<Name>/` folder (the `_` prefix opts the folder out of Next's
 route tree, so `_components/FindingCard/` is not itself a route). See
-[../CLAUDE.md](../CLAUDE.md)'s Naming conventions for the file layout inside
+[../AGENTS.md](../AGENTS.md)'s Naming conventions for the file layout inside
 one of these folders (`<Name>.tsx`, `styles.ts`, `constants.ts`, `helpers.ts`,
 `index.ts`, `<Name>.test.tsx`).
 
@@ -85,5 +85,5 @@ A component never calls `apiFetch` or `fetch` directly. If the data a new
 component needs isn't covered by an existing hook, add one to
 `src/lib/hooks/<resource>.ts` rather than reaching around it — this is what
 keeps `client/*.test.tsx` able to mock one hook and get a deterministic
-component test (see `client/CLAUDE.md`'s Gotchas on what that test tier does
+component test (see `client/AGENTS.md`'s Gotchas on what that test tier does
 and doesn't prove).

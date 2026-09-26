@@ -17,5 +17,14 @@
     "title": "No repo selected",
     "body": "This repository isn't in your workspace — it may have been removed, or the link is stale. Add a repo or pick another from the switcher to get started.",
     "cta": "Add repository"
+  },
+  "errorPage": {
+    "title": "Something went wrong",
+    "body": "This page hit an unexpected error. Try again — if it keeps happening, reload the app."
+  },
+  "notFound": {
+    "title": "Page not found",
+    "body": "There's nothing at this address. The link may be stale or mistyped.",
+    "cta": "Go to the dashboard"
   }
 }

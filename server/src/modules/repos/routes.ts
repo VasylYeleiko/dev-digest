@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { RepoInput } from '@devdigest/shared';
-import { getContext } from '../_shared/context.js';
+import { requestContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
-import { RepoService } from './service.js';
+import { createRepoService } from './compose.js';
 
 /**
  * F1 — repos module. Transport layer only: parses requests, maps status
@@ -13,35 +13,36 @@ import { RepoService } from './service.js';
  *   POST   /repos/:id/refresh  → re-fetch clone + bump last_polled_at
  *   DELETE /repos/:id          → remove repo
  *
- * The clone runs as a JobRunner job (kind 'clone') — real `git clone` via the
- * GitClient adapter into <cloneDir>/<owner>/<repo>.
+ * The clone runs as a JobQueue job (kind 'clone') — real `git clone` via the
+ * GitClient port into <cloneDir>/<owner>/<repo>.
  */
 export default async function reposRoutes(appBase: FastifyInstance) {
   const app = appBase.withTypeProvider<ZodTypeProvider>();
-  const service = new RepoService(app.container);
+  const ctx = requestContext(app.container.auth);
+  const service = createRepoService(app.container);
 
   // Register the clone job handler once.
   service.registerCloneJobHandler();
 
   app.post('/repos', { schema: { body: RepoInput } }, async (req, reply) => {
-    const { workspaceId, userId } = await getContext(app.container, req);
+    const { workspaceId, userId } = await ctx(req);
     const { repo, created } = await service.add(workspaceId, userId, req.body.url);
     reply.status(created ? 201 : 200);
     return repo;
   });
 
   app.get('/repos', async (req) => {
-    const { workspaceId } = await getContext(app.container, req);
+    const { workspaceId } = await ctx(req);
     return service.list(workspaceId);
   });
 
   app.post('/repos/:id/refresh', { schema: { params: IdParams } }, async (req) => {
-    const { workspaceId } = await getContext(app.container, req);
+    const { workspaceId } = await ctx(req);
     return service.refresh(workspaceId, req.params.id);
   });
 
   app.delete('/repos/:id', { schema: { params: IdParams } }, async (req) => {
-    const { workspaceId } = await getContext(app.container, req);
+    const { workspaceId } = await ctx(req);
     await service.remove(workspaceId, req.params.id);
     return { deleted: req.params.id };
   });

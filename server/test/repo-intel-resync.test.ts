@@ -15,9 +15,8 @@ import { describe, it, expect } from 'vitest';
 import { RepoIntelService } from '../src/modules/repo-intel/service.js';
 import { MockGitClient } from '../src/adapters/mocks.js';
 import { INDEXER_VERSION } from '../src/modules/repo-intel/constants.js';
-import type { RepoIntelRepository } from '../src/modules/repo-intel/repository.js';
+import type { RepoIntelStore } from '../src/modules/repo-intel/ports.js';
 import type { IndexState } from '../src/modules/repo-intel/types.js';
-import type { Container } from '../src/platform/container.js';
 
 interface Basics {
   id: string;
@@ -27,7 +26,7 @@ interface Basics {
   clonePath: string | null;
 }
 
-/** Build a service with a stubbed repository (no DB) + a MockGitClient. */
+/** Build a service with a stubbed store (no DB) + a MockGitClient. */
 function makeService(opts: { basics: Basics | null; state?: IndexState | null; git: MockGitClient }) {
   let state = opts.state ?? null;
   const touched = { n: 0 };
@@ -38,17 +37,21 @@ function makeService(opts: { basics: Basics | null; state?: IndexState | null; g
       touched.n += 1;
       if (state) state = { ...state, updatedAt: new Date() };
     },
-  } as unknown as RepoIntelRepository;
+  } as unknown as RepoIntelStore;
 
-  const container = {
+  const service = new RepoIntelService({
+    store: repo,
     git: opts.git,
-    db: {}, // never queried — service.repo is overridden below
     depgraph: { buildEdges: async () => [] },
     tokenizer: { count: (text: string) => Math.ceil(text.length / 4) },
-  } as unknown as Container;
-
-  const service = new RepoIntelService(container);
-  (service as unknown as { repo: RepoIntelRepository }).repo = repo;
+    codeIndex: {} as never,
+    jobs: {} as never,
+    repos: {} as never,
+    parser: {} as never,
+    files: {} as never,
+    indexConcurrency: 1,
+    enabled: true,
+  });
   return { service, touched };
 }
 

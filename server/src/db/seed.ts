@@ -7,6 +7,7 @@ import {
   GENERAL_REVIEWER_PROMPT,
   SECURITY_REVIEWER_PROMPT,
   PERFORMANCE_REVIEWER_PROMPT,
+  TEST_QUALITY_REVIEWER_PROMPT,
 } from './seed-prompts.js';
 
 /** Default provider/model for the built-in reviewer agents. */
@@ -176,7 +177,86 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
     ]);
   }
 
-  // ---- built-in agents (the three starter presets) ----
+  // ---- skills (reusable Markdown prompt blocks) ----
+  // 3 of the 4 demo skills — `flake-guard` is deliberately left OUT of seed; it
+  // is imported by hand through the UI as a manual demo step. Inserted directly
+  // (not through the service), same style as the agents below.
+  const seedSkills: Array<typeof t.skills.$inferInsert> = [
+    {
+      workspaceId,
+      name: 'branch-coverage-rubric',
+      description: 'Flags production branches this diff\'s tests never exercise.',
+      type: 'rubric',
+      source: 'manual',
+      body: `# Branch coverage rubric
+
+Flag production logic whose branches this diff's tests don't exercise.
+
+- Every \`if\`/\`else\`, \`switch\` case, and ternary added or changed by the diff needs
+  at least one test that drives execution down EACH side — not just the happy path.
+- Error and rejection paths (\`catch\`, a thrown \`AppError\`, a \`.catch()\`) count as a
+  branch too: a handler with no test for its failure path is an uncovered branch.
+- \`??\` / \`||\` fallbacks and early returns are branches — test the case where the
+  fallback fires, not only the case where it doesn't.
+- A loop needs both a zero-iteration and a multi-iteration case whenever the diff
+  changes what happens inside it.`,
+      enabled: true,
+      version: 1,
+    },
+    {
+      workspaceId,
+      name: 'corner-case-checklist',
+      description: 'A checklist of edge-case inputs a diff\'s tests should try.',
+      type: 'convention',
+      source: 'manual',
+      body: `# Corner-case checklist
+
+Before approving, confirm the diff's tests try these inputs where relevant:
+
+- Empty: \`''\`, \`[]\`, \`{}\`, \`0\`, an empty result set / empty page.
+- Boundary: the first item, the last item, exactly at a limit/threshold (off-by-one).
+- Null vs. undefined: an optional field left out entirely vs. explicitly \`null\`.
+- Concurrency: two operations racing on the same key/row, a cancel mid-flight.
+- Changed contracts: a new field, a changed status code, a changed nullability —
+  pin the new shape with an assertion, don't just eyeball it.`,
+      enabled: true,
+      version: 1,
+    },
+    {
+      workspaceId,
+      name: 'mock-discipline',
+      description: 'Rules for when a mock hides a regression instead of catching one.',
+      type: 'convention',
+      source: 'manual',
+      body: `# Mock discipline
+
+- Never mock the exact function or module the test claims to verify — that
+  guarantees the test can't fail even when the logic breaks.
+- A mock's return value should model realistic behavior, not the exact object the
+  assertion checks for — hand-tuning a mock to match the assertion tests nothing.
+- Tests named or shaped like an integration test (crossing modules, hitting the DB)
+  should use the project's real fixtures/testcontainers, not a mocked DB/container.
+- When the real dependency a mock stands in for changes shape, update the mock in
+  the same diff — a stale mock is a false green.`,
+      enabled: true,
+      version: 1,
+    },
+  ];
+  for (const s of seedSkills) {
+    const [existing] = await db
+      .select()
+      .from(t.skills)
+      .where(and(eq(t.skills.workspaceId, workspaceId), eq(t.skills.name, s.name)));
+    if (!existing) {
+      const [row] = await db.insert(t.skills).values(s).returning();
+      await db
+        .insert(t.skillVersions)
+        .values({ skillId: row!.id, version: 1, body: row!.body })
+        .onConflictDoNothing();
+    }
+  }
+
+  // ---- built-in agents (the four starter presets) ----
   // Prompt bodies live in ./seed-prompts.ts (mirrored in docs/agent-prompts/*.md).
   const seedAgents: Array<typeof t.agents.$inferInsert> = [
     {
@@ -212,6 +292,17 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
       version: 1,
       createdBy: userId,
     },
+    {
+      workspaceId,
+      name: 'Test Quality Reviewer',
+      description: 'Flags uncovered branches, missed corner cases, over-mocking, and flaky tests.',
+      provider: DEFAULT_PROVIDER,
+      model: DEFAULT_MODEL,
+      systemPrompt: TEST_QUALITY_REVIEWER_PROMPT,
+      enabled: true,
+      version: 1,
+      createdBy: userId,
+    },
   ];
   for (const a of seedAgents) {
     const [existing] = await db
@@ -219,6 +310,30 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
       .from(t.agents)
       .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.name, a.name)));
     if (!existing) await db.insert(t.agents).values(a);
+  }
+
+  // ---- link the demo skills to Test Quality Reviewer (order 0..2) ----
+  // `flake-guard` is intentionally NOT linked here — it isn't seeded (imported
+  // by hand in the demo). Guarded per-link via onConflictDoNothing on the
+  // (agentId, skillId) PK, so re-seeding never duplicates or reorders a link.
+  const [testQualityReviewer] = await db
+    .select()
+    .from(t.agents)
+    .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.name, 'Test Quality Reviewer')));
+  if (testQualityReviewer) {
+    const linkedSkillNames = ['branch-coverage-rubric', 'corner-case-checklist', 'mock-discipline'];
+    for (let i = 0; i < linkedSkillNames.length; i++) {
+      const [skill] = await db
+        .select()
+        .from(t.skills)
+        .where(and(eq(t.skills.workspaceId, workspaceId), eq(t.skills.name, linkedSkillNames[i]!)));
+      if (skill) {
+        await db
+          .insert(t.agentSkills)
+          .values({ agentId: testQualityReviewer.id, skillId: skill.id, order: i })
+          .onConflictDoNothing();
+      }
+    }
   }
 
   // ---- a demo agent run, backing the seeded review's PR timeline row ----
@@ -265,7 +380,8 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
 }
 
 // CLI entrypoint
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+// argv[1] is absent when imported as a module (e.g. by tests) — not a CLI run.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const url = process.env.DATABASE_URL;
   if (!url) {
     console.error('DATABASE_URL is required');

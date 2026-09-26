@@ -1,6 +1,6 @@
 /* hooks/repo-intel.ts — React Query hooks for the repo-intel (T3) index state.
-   Mirrors hooks/context.ts (useIndexStatus/useReindex) but targets the
-   repo-intel facade's HTTP surface:
+   Targets the repo-intel facade's HTTP surface (both endpoints 404 for a repo
+   outside the caller's workspace):
      GET  /repos/:id/index-state  → RepoIntelState
      POST /repos/:id/resync       → fetch latest from origin + incremental
                                      reindex (202). NOT a destructive re-clone. */
@@ -23,14 +23,18 @@ export interface RepoIntelState {
   reason?: string;
 }
 
+const repoIntelKeys = {
+  state: (repoId: string | null | undefined) => ["repo-intel-state", repoId] as const,
+};
+
 /** GET /repos/:id/index-state → current repo-intel index state.
     While `poll` is true, refetch on an interval so a running resync's result
-    becomes visible. The caller (ProjectContextView) owns when to stop polling
+    becomes visible. The caller owns when to stop polling
     (the status enum is terminal-only, so completion is detected by watching
     `lastIndexedSha`/`updatedAt` advance, not by status). */
 export function useRepoIntelStatus(repoId: string | null | undefined, poll = false) {
   return useQuery({
-    queryKey: ["repo-intel-state", repoId],
+    queryKey: repoIntelKeys.state(repoId),
     queryFn: () => api.get<RepoIntelState>(`/repos/${repoId}/index-state`),
     enabled: !!repoId,
     refetchInterval: poll ? 1500 : false,
@@ -43,7 +47,7 @@ export function useResyncRepoIntel(repoId: string | null | undefined) {
   return useMutation({
     mutationFn: () => api.post<{ status: string }>(`/repos/${repoId}/resync`),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["repo-intel-state", repoId] });
+      qc.invalidateQueries({ queryKey: repoIntelKeys.state(repoId) });
     },
   });
 }

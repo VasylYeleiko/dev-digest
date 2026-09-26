@@ -1,31 +1,24 @@
-import { z } from 'zod';
+import type { z } from 'zod';
 import type {
+  ModelInfo,
   PrMeta,
   PrDetail,
   IssueMeta,
   PrReviewComment,
 } from './contracts/platform.js';
+import type { RunEvent, RunEventKind } from './contracts/trace.js';
 
 /**
- * Adapter interfaces. ALL external calls go behind these interfaces.
- * Real implementations live in `apps/api/src/adapters/*`; mock implementations
- * live alongside for tests/dev (Services depend on the interface, not the impl).
+ * Port interfaces. ALL external calls (vendor SDKs, network, filesystem,
+ * in-process platform services) go behind these interfaces. Concrete
+ * implementations live in `server/src/adapters/<name>/` (and
+ * `server/src/platform/` for the job queue + run event bus); mocks live in
+ * `server/src/adapters/mocks.ts`. Services depend on the interface, never the
+ * implementation — see `.claude/skills/onion-architecture`.
  */
 
 // ---------- LLM ----------
-export const ModelInfo = z.object({
-  id: z.string(),
-  provider: z.enum(['openai', 'anthropic', 'openrouter']),
-  label: z.string().nullish(),
-  created: z.number().int().nullish(),
-  /** Pricing in USD per 1M tokens (when the provider exposes it, e.g. OpenRouter). */
-  pricing: z
-    .object({ promptPerM: z.number(), completionPerM: z.number() })
-    .nullish(),
-  /** Max context window in tokens (when the provider exposes it). */
-  contextLength: z.number().int().nullish(),
-});
-export type ModelInfo = z.infer<typeof ModelInfo>;
+// ModelInfo (the `/models` wire shape) is a contract: contracts/platform.ts.
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -79,8 +72,10 @@ export interface StructuredResult<T> {
   attempts: number;
 }
 
+export type LLMProviderId = 'openai' | 'anthropic' | 'openrouter';
+
 export interface LLMProvider {
-  readonly id: 'openai' | 'anthropic' | 'openrouter';
+  readonly id: LLMProviderId;
   listModels(): Promise<ModelInfo[]>;
   complete(req: CompletionRequest): Promise<CompletionResult>;
   completeStructured<T>(req: StructuredRequest<T>): Promise<StructuredResult<T>>;
@@ -285,4 +280,149 @@ export interface SecretsProvider {
    * providers (e.g. the env-only MVP backend) may omit it.
    */
   set?(key: SecretKey, value: string): Promise<void>;
+}
+
+// ---------- Logging ----------
+/** Structured logger (pino-compatible: `(obj, msg)`). MVP = Fastify's pino instance. */
+export interface Logger {
+  info(obj: unknown, msg?: string): void;
+  warn(obj: unknown, msg?: string): void;
+  error(obj: unknown, msg?: string): void;
+  debug(obj: unknown, msg?: string): void;
+}
+
+// ---------- Lazy resolvers ----------
+// GitHub + LLM clients are built on first use from a secret (and rebuilt after
+// the secret changes), so services receive a resolver, not a client instance.
+export type GitHubClientResolver = () => Promise<GitHubClient>;
+export type LLMProviderResolver = (id: LLMProviderId) => Promise<LLMProvider>;
+
+// ---------- Job queue (in-process; MVP = JobRunner over p-queue + jobs table) ----------
+export type JobHandler = (payload: unknown, ctx: { jobId: string }) => Promise<void>;
+
+export interface EnqueuedJob {
+  id: string;
+  /** Resolves when the job finishes (or rejects if it ultimately fails). */
+  done: Promise<void>;
+}
+
+export interface JobQueue {
+  register(kind: string, handler: JobHandler): void;
+  /** Throws when no handler is registered for `kind`. */
+  enqueue(workspaceId: string, kind: string, payload: unknown): Promise<EnqueuedJob>;
+}
+
+// ---------- Run event bus (in-process; MVP = RunBus over EventEmitter) ----------
+export interface RunEventBus {
+  publish(runId: string, kind: RunEventKind, msg: string, data?: unknown): RunEvent;
+  /** Subscribe to live events; replays buffered events first. Returns unsubscribe. */
+  subscribe(runId: string, listener: (e: RunEvent) => void): () => void;
+  /** The full buffered log for a run. */
+  buffer(runId: string): RunEvent[];
+  cancel(runId: string): void;
+  isCancelled(runId: string): boolean;
+  complete(runId: string): void;
+  /** Whether this process saw the run complete (and still holds its replay buffer). */
+  isComplete(runId: string): boolean;
+  /** Whether this process holds any state for the run (live or recently completed). */
+  knows(runId: string): boolean;
+  /** Fires once when the run completes (immediately if it already has). */
+  onDone(runId: string, listener: () => void): () => void;
+}
+
+// ---------- Code intelligence (repo-intel) ----------
+export interface ExtractedSymbol {
+  name: string;
+  kind: string;
+  line: number;
+}
+
+export interface ExtractedReference {
+  toSymbol: string;
+  line: number;
+}
+
+export interface ParsedSymbol extends ExtractedSymbol {
+  /** True when the declaration is reached through an `export` form. */
+  exported: boolean;
+  /** Declaration head trimmed to MAX_SIGNATURE_CHARS; null for kinds without one. */
+  signature: string | null;
+  /** 1-based line of the closing token of the declaration body. */
+  endLine: number;
+}
+
+export interface ParsedReference extends ExtractedReference {
+  /** Path passed in by the caller — surfaced so consumers can fan-out. */
+  refFile: string;
+}
+
+export interface ParsedImport {
+  name: string;
+  source: string;
+  isType: boolean;
+}
+
+export interface ParsedInvocationHead {
+  /** The bare identifier being invoked (callee name, ctor name, or JSX tag). */
+  name: string;
+  /** 1-based line of the invocation. */
+  line: number;
+  /** Which AST shape produced this head. */
+  kind: 'call' | 'new' | 'jsx';
+}
+
+/** Source-code parser (MVP = ast-grep + regex extractors). Pure, in-memory. */
+export interface CodeParser {
+  /** Whether `file` is in a language this parser understands. */
+  supports(file: string): boolean;
+  parseSymbols(file: string, source: string): ParsedSymbol[];
+  parseReferences(file: string, source: string): ParsedReference[];
+  parseImports(file: string, source: string): ParsedImport[];
+  parseInvocationHeads(file: string, source: string): ParsedInvocationHead[];
+  /** "METHOD /path" strings found in `source`. */
+  extractEndpoints(source: string): string[];
+  /** Cron expressions found in `source`. */
+  extractCrons(source: string): string[];
+}
+
+export interface WalkStats {
+  /** Files seen on disk with a supported extension (before size + bound filters). */
+  totalCandidates: number;
+  /** Candidates dropped because they exceed the max indexed file size. */
+  skippedTooLarge: number;
+  /** Candidates dropped because the file list exceeded the max indexed file count. */
+  bounded: number;
+}
+
+export interface WalkResult {
+  /** Paths relative to `root`, separator-normalized to forward slashes. */
+  files: string[];
+  stats: WalkStats;
+}
+
+/** Read access to a local clone on disk. */
+export interface SourceFiles {
+  /** UTF-8 contents of `root/relPath`, or null when missing/unreadable. */
+  read(root: string, relPath: string): Promise<string | null>;
+  /** The indexable file set under `root` (exclusions + size/count bounds applied). */
+  walk(root: string): Promise<WalkResult>;
+}
+
+export interface FileEdge {
+  from: string;
+  to: string;
+}
+
+/** Import-graph builder (MVP = dependency-cruiser). */
+export interface DepGraph {
+  /**
+   * Resolve the local import edges among `files` (repo-relative) under `root`.
+   * Never throws — returns `[]` on any failure.
+   */
+  buildEdges(root: string, files: string[]): Promise<FileEdge[]>;
+}
+
+/** Token counter for prompt budgets (MVP = js-tiktoken). Never throws. */
+export interface Tokenizer {
+  count(text: string): number;
 }

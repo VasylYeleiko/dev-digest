@@ -40,9 +40,9 @@ If anything was lost, restore it before continuing — `git diff` on the file
 should show only additions.
 
 **The only file this skill modifies is the package's `INSIGHTS.md`.** Each
-`INSIGHTS.md` header invites promoting a load-bearing note into `CLAUDE.md` —
+`INSIGHTS.md` header invites promoting a load-bearing note into `AGENTS.md` —
 that is an instruction to the human, not to you. Say the entry looks worth
-promoting and let the user decide; never edit `CLAUDE.md`, `README.md` or any
+promoting and let the user decide; never edit `AGENTS.md`, `CLAUDE.md`, `README.md` or any
 other file from this skill.
 
 ## Which file
@@ -100,7 +100,7 @@ A candidate must pass **all four** filters:
 - **Project-specific** — true of *this* repo, not of TypeScript in general.
 
 Never record a one-time fix, a task-specific decision, or anything already in
-`CLAUDE.md` or the package `README.md`. Never paper over bad tooling — if a
+`AGENTS.md` or the package `README.md`. Never paper over bad tooling — if a
 command keeps being forgotten because it's awkward, fix the command.
 
 Then, before appending: read the target file **in full** and check for an
