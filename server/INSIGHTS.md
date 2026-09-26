@@ -103,6 +103,16 @@ editing both in lock-step or the client silently loses the field. Verify with
 
 ## Tool & Library Notes
 
+### 2026-09-26 — dependency-cruiser resolves tsconfig `paths` against `process.cwd()`, not the tsconfig's dir
+
+Passing only `cruise(files, { tsConfig: { fileName } })` is not enough: with no
+`baseUrl` in the 4th arg (`transpileOptions.tsConfig.options`), cruise hands
+`TsConfigPathsPlugin` `baseUrl: "./"`, which the plugin `path.resolve()`s against
+the **server's** cwd — every alias silently stays `couldNotResolve` for a clone.
+Always pass `{ tsConfig: { options: { baseUrl: <any truthy> } } }` so the plugin
+reads its base from the tsconfig file itself. Evidence: `src/adapters/depgraph/index.ts`
+(`runCruise`), `node_modules/dependency-cruiser/src/main/resolve-options/normalize.mjs:111`.
+
 ### 2026-09-23 — `buildApp()` flips every `running` agent run to `failed` on boot, so a test's seeded "running" run won't stay running
 
 App boot calls `ReviewService.reapStaleRuns()` (orphaned runs from a dead
@@ -149,6 +159,15 @@ won't throw, but it will actually attempt one and make the test slow/flaky).
 Evidence: `test/container-llm.test.ts`, `src/platform/container.ts:140-151`.
 
 ## Decisions
+
+### 2026-09-26 — depgraph cruises once per nearest-`tsconfig.json` group (answers the 2026-09-26 Open Question)
+
+`groupByTsConfig` keys each file by its nearest ancestor tsconfig; each group is
+cruised with its own config and only emits edges for its own files (cruise follows
+into other packages with the wrong config). Corrects that entry's premise: `vendor/`
+is in `EXCLUDED_DIRS`, so 55 of the ~75 alias imports target unindexed files and are
+still dropped by `fileSet` — on dev-digest edges went 514 → 534, not +75. Evidence:
+`src/adapters/depgraph/index.ts`, `src/modules/repo-intel/constants.ts:24`.
 
 ### 2026-09-26 — attaching a disabled skill to an agent is rejected server-side too, not just hidden in the UI
 

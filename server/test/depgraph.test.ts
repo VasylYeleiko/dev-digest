@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path, { dirname, join } from 'node:path';
-import { DepCruiseGraph, toRepoRel } from '../src/adapters/depgraph/index.js';
+import { DepCruiseGraph, groupByTsConfig, toRepoRel } from '../src/adapters/depgraph/index.js';
 
 async function writeFileAt(root: string, rel: string, contents: string): Promise<void> {
   const full = join(root, rel);
@@ -61,5 +61,84 @@ describe('DepCruiseGraph.buildEdges', () => {
       ]),
     );
     expect(edges).toHaveLength(2);
+  });
+
+  it('resolves each package\'s tsconfig `paths` aliases against its own tsconfig', async () => {
+    // No root tsconfig; `@/*` maps to a DIFFERENT dir in each package, so a
+    // single shared config can't resolve both. Tests run with cwd = server/,
+    // never the fixture root — also guards the baseUrl-vs-cwd trap in runCruise.
+    const tsconfig = (paths: Record<string, string[]>) =>
+      JSON.stringify({ compilerOptions: { module: 'NodeNext', paths } });
+    await writeFileAt(root, 'pkg-a/tsconfig.json', tsconfig({ '@/*': ['./src/*'] }));
+    await writeFileAt(
+      root,
+      'pkg-b/tsconfig.json',
+      tsconfig({ '@/*': ['./src/*'], '@shared/*': ['../pkg-a/src/*'] }),
+    );
+    await writeFileAt(root, 'pkg-a/src/lib/util.ts', 'export const util = 1;');
+    await writeFileAt(root, 'pkg-a/src/index.ts', "import { util } from '@/lib/util.js';\nexport const a = util;");
+    await writeFileAt(root, 'pkg-b/src/lib/util.ts', 'export const util = 2;');
+    await writeFileAt(
+      root,
+      'pkg-b/src/index.ts',
+      "import { util } from '@/lib/util.js';\nimport { a } from '@shared/index.js';\nexport const b = util + a;",
+    );
+    // No tsconfig anywhere above it → cruised without one; relative still resolves.
+    await writeFileAt(root, 'scripts/run.ts', "import { b } from '../pkg-b/src/index.js';\nexport const r = b;");
+    const files = [
+      'pkg-a/src/index.ts',
+      'pkg-a/src/lib/util.ts',
+      'pkg-b/src/index.ts',
+      'pkg-b/src/lib/util.ts',
+      'scripts/run.ts',
+    ];
+
+    const edges = await new DepCruiseGraph().buildEdges(root, files);
+
+    expect(edges).toEqual(
+      expect.arrayContaining([
+        { from: 'pkg-a/src/index.ts', to: 'pkg-a/src/lib/util.ts' },
+        { from: 'pkg-b/src/index.ts', to: 'pkg-b/src/lib/util.ts' },
+        { from: 'pkg-b/src/index.ts', to: 'pkg-a/src/index.ts' },
+        { from: 'scripts/run.ts', to: 'pkg-b/src/index.ts' },
+      ]),
+    );
+    // Deduped: pkg-a is also reached (and re-cruised) from pkg-b's run.
+    expect(edges).toHaveLength(4);
+  });
+});
+
+describe('groupByTsConfig', () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'repo-intel-depgraph-group-'));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('keys each file by its nearest ancestor tsconfig dir, null when none', async () => {
+    await writeFileAt(root, 'server/tsconfig.json', '{}');
+    await writeFileAt(root, 'server/src/deep/tsconfig.json', '{}');
+
+    const groups = groupByTsConfig(root, [
+      'server/src/a.ts',
+      'server/src/deep/x/b.ts',
+      'top.ts',
+      'client/src/c.ts',
+    ]);
+
+    expect(Object.fromEntries(groups)).toEqual({
+      server: ['server/src/a.ts'],
+      'server/src/deep': ['server/src/deep/x/b.ts'],
+      null: ['top.ts', 'client/src/c.ts'],
+    });
+  });
+
+  it('uses the root tsconfig (key "") when it is the nearest', async () => {
+    await writeFileAt(root, 'tsconfig.json', '{}');
+
+    expect(groupByTsConfig(root, ['a.ts', 'src/b.ts']).get('')).toEqual(['a.ts', 'src/b.ts']);
   });
 });
