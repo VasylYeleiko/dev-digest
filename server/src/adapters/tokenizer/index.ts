@@ -13,11 +13,7 @@
  */
 import { getEncoding, type Tiktoken } from 'js-tiktoken';
 import type { Tokenizer } from '@devdigest/shared';
-
-/** Heuristic fallback used before/instead of a real encoder. */
-export function approxTokens(text: string): number {
-  return Math.ceil(text.length / 4);
-}
+import { approxTokens } from '../../platform/tokens.js';
 
 export class TiktokenTokenizer implements Tokenizer {
   private enc?: Tiktoken;

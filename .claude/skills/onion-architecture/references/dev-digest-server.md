@@ -39,7 +39,7 @@ Every folder under `server/src/modules/` follows the same file roles
 | `src/vendor/shared/contracts/*` | 1 | Zod wire contracts (snake_case). Mirror every change into `client/src/vendor/shared/contracts/` |
 | `src/vendor/shared/adapters.ts` | 1 | **all** shared port interfaces. Server + reviewer-core only |
 | `@devdigest/reviewer-core` | 1 | pure review engine (`reviewPullRequest`, `countBlockers`, grounding). `OpenRouterProvider` from it is an adapter: only `container.ts` constructs it |
-| `platform/errors.ts`, `resilience.ts`, `diff-parser.ts`, `trace-builder.ts`, `run-logger.ts`, `price-book.ts`, `model-router.ts`, `grounding.ts`, `prompt.ts`, `structured.ts` | 1 (shared kernel) | pure; importable from any ring |
+| `platform/errors.ts`, `resilience.ts`, `diff-parser.ts`, `trace-builder.ts`, `run-logger.ts`, `price-book.ts`, `model-router.ts`, `grounding.ts`, `prompt.ts`, `structured.ts`, `tokens.ts` | 1 (shared kernel) | pure; importable from any ring |
 | `platform/config.ts` | 3 | reads `process.env` — only the composition root reads `AppConfig` |
 | `platform/jobs.ts` (`JobRunner`) | 3 | implements `JobQueue` (p-queue + `jobs` table) |
 | `platform/sse.ts` (`RunBus`) | 3 | implements `RunEventBus` |

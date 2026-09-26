@@ -9,7 +9,7 @@ import type {
 } from '@devdigest/shared';
 import { reviewPullRequest, countBlockers } from '@devdigest/reviewer-core';
 import { RunLogger } from '../../platform/run-logger.js';
-import { approxTokens } from '../../adapters/tokenizer/index.js';
+import { approxTokens } from '../../platform/tokens.js';
 import type { AgentEntity } from '../agents/index.js';
 import type { PullEntity, PullStore } from '../pulls/index.js';
 import type { RepoEntity } from '../repos/index.js';

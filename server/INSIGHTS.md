@@ -210,6 +210,16 @@ Evidence: `src/vendor/shared/contracts/trace.ts`, `src/platform/trace-builder.ts
 
 ## Recurring Errors & Fixes
 
+### 2026-09-26 — fresh checkout/worktree: `pnpm typecheck` fails in `../reviewer-core/src/**` until reviewer-core has its own `node_modules`
+
+`tsconfig.json`'s path alias compiles `@devdigest/reviewer-core` from source, and
+its imports (`openai`, `openai/helpers/zod`, `zod`) resolve from
+`reviewer-core/node_modules`, not server's — so after pnpm auto-installs server
+deps, typecheck still shows TS2307 in `reviewer-core/src/llm/{openrouter,structured}.ts`
+plus knock-on TS2322 `unknown → T` in `src/adapters/llm/*.ts`. Not your change
+(qualifies the 2026-09-23 "any typecheck error is now yours" note): run
+`cd ../reviewer-core && npm ci` (lockfile untouched) and re-run. Evidence: `server/tsconfig.json:24-25`.
+
 ### 2026-09-23 — `pnpm typecheck` is now green and covers tests (supersedes the "red on HEAD with exactly 2 errors" note)
 
 The `migrate.ts` / `seed.ts` TS2345 errors are fixed (`process.argv[1] &&`
