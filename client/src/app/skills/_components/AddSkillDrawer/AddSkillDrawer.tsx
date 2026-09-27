@@ -1,6 +1,7 @@
-/* AddSkillDrawer — File / URL / Community tabs. Only File is interactive
-   (decision #1 in the Skills plan): import = file/archive only, preview then
-   confirm; URL and Community render disabled "coming soon" content. */
+/* AddSkillDrawer — File / URL / Community tabs. File and URL are interactive:
+   each fetches/parses server-side into a preview (with its prompt-injection
+   report), nothing persists until the user confirms. Community renders
+   disabled "coming soon" content. */
 "use client";
 
 import React from "react";
@@ -35,7 +36,7 @@ export function AddSkillDrawer({
         <Tabs tabs={tabs} value={tab} onChange={(k) => setTab(k as AddSkillDrawerTab)} pad="0" />
       </div>
       {tab === "file" && <FileTab onClose={onClose} />}
-      {tab === "url" && <UrlTab />}
+      {tab === "url" && <UrlTab onClose={onClose} />}
       {tab === "community" && <CommunityTab />}
     </Drawer>
   );

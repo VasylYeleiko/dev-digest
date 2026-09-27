@@ -1,0 +1,6 @@
+/**
+ * conventions — public API (ring 1). Types, ports and constants other modules
+ * may depend on. No Container, no concrete classes — see `compose.ts`.
+ */
+export type { ConventionEntity, ConventionScanEntity } from './types.js';
+export type { ConventionStore } from './ports.js';

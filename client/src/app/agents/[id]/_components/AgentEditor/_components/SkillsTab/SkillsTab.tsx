@@ -19,7 +19,8 @@ import type { Agent, Skill } from "@devdigest/shared";
 import { useSkills } from "../../../../../../../lib/hooks/skills";
 import { useAgentSkills, useSetAgentSkills } from "../../../../../../../lib/hooks/agents";
 import { SkillTypeChip } from "../../../../../../../components/SkillTypeChip";
-import { canAttach, filterSkillsByName, orderedLinkedIds, reorderIds } from "./helpers";
+import { InjectionBadge } from "../../../../../../../components/InjectionBadge";
+import { canAttach, filterSkillsByName, isInjectionFlagged, orderedLinkedIds, reorderIds } from "./helpers";
 import { s } from "./styles";
 
 export function SkillsTab({ agent }: { agent: Agent }) {
@@ -77,11 +78,15 @@ export function SkillsTab({ agent }: { agent: Agent }) {
       {visible.map((sk) => {
         const isLinked = linkedSet.has(sk.id);
         const attachable = canAttach(sk);
-        const draggable = isLinked;
+        const flagged = isInjectionFlagged(sk);
+        // Only linked AND enabled skills reorder: a disabled one isn't in the
+        // prompt, so its position is meaningless (it can still be detached).
+        const draggable = isLinked && sk.enabled;
+        const blockedHint = flagged ? t("skills.injectionHint") : t("skills.disabledHint");
         return (
           <div
             key={sk.id}
-            style={s.row(overId === sk.id && draggingId !== null && draggingId !== sk.id, !sk.enabled)}
+            style={s.row(overId === sk.id && draggingId !== null && draggingId !== sk.id, !sk.enabled, flagged)}
             draggable={draggable}
             onDragStart={draggable ? () => setDraggingId(sk.id) : undefined}
             onDragOver={
@@ -112,9 +117,13 @@ export function SkillsTab({ agent }: { agent: Agent }) {
                 label={sk.name}
               />
             </div>
-            <div style={s.meta} title={!attachable && !isLinked ? t("skills.disabledHint") : undefined}>
+            <div style={s.meta} title={!attachable && !isLinked ? blockedHint : undefined}>
               <SkillTypeChip type={sk.type} />
-              {!sk.enabled && <span style={s.disabledBadge}>{t("skills.disabledBadge")}</span>}
+              {flagged ? (
+                <InjectionBadge />
+              ) : (
+                !sk.enabled && <span style={s.disabledBadge}>{t("skills.disabledBadge")}</span>
+              )}
             </div>
           </div>
         );

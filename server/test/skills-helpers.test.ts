@@ -7,7 +7,7 @@ import {
   toSkillStatsDto,
   toSkillVersionDto,
 } from '../src/modules/skills/helpers.js';
-import { MAX_IMPORT_BYTES } from '../src/modules/skills/constants.js';
+import { MAX_IMPORT_BYTES, MAX_UNZIPPED_SKILL_BYTES } from '../src/modules/skills/constants.js';
 import type { SkillEntity, SkillStatsEntity, SkillVersionEntity } from '../src/modules/skills/types.js';
 
 /**
@@ -42,6 +42,7 @@ describe('toSkillDto', () => {
       enabled: true,
       version: 1,
       evidence_files: null,
+      injection: { detected: false, findings: [] },
     });
   });
 
@@ -176,6 +177,12 @@ describe('parseSkillFile — zip', () => {
     });
     const parsed = parseSkillFile('bundle.zip', zip);
     expect(parsed.name).toBe('Fallback Skill');
+  });
+
+  it('refuses a zip bomb: a tiny archive whose SKILL.md inflates past the cap', () => {
+    const zip = zipSync({ 'SKILL.md': new Uint8Array(MAX_UNZIPPED_SKILL_BYTES + 1).fill(0x61) }, { level: 9 });
+    expect(zip.byteLength).toBeLessThan(MAX_IMPORT_BYTES);
+    expect(() => parseSkillFile('bomb.zip', zip)).toThrow(/size cap/);
   });
 
   it('throws when the zip has no markdown entry at all', () => {

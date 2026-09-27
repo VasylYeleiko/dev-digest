@@ -8,6 +8,7 @@
  *                         Skill/CommunitySkill, ConventionCandidate, Agent
  *  - contracts/trace      RunTrace, RunEvent, RunLogLine (single-document trace)
  *  - contracts/platform   Settings, ConnTestResult, Repo, PrMeta/PrDetail, SpecFile, …
+ *  - contracts/conventions Convention, ConventionScan, triage + skill-from-conventions DTOs
  *  - adapters             port interfaces (server + reviewer-core only; the
  *                         client copy of this package does not carry them)
  *
@@ -25,4 +26,5 @@ export * from './contracts/why.js';
 export * from './contracts/eval-ci.js';
 export * from './contracts/observability.js';
 export * from './contracts/productionize.js';
+export * from './contracts/conventions.js';
 export * from './adapters.js';

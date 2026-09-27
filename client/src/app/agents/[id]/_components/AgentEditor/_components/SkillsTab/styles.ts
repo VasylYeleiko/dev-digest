@@ -7,16 +7,16 @@ export const s = {
   h2: { fontSize: 16, fontWeight: 700 } satisfies CSSProperties,
   searchBox: { marginBottom: 8 } satisfies CSSProperties,
   hint: { fontSize: 12, color: "var(--text-muted)", marginBottom: 16, lineHeight: 1.5 } satisfies CSSProperties,
-  row: (dragOver: boolean, disabled: boolean): CSSProperties => ({
+  row: (dragOver: boolean, disabled: boolean, flagged = false): CSSProperties => ({
     display: "flex",
     alignItems: "center",
     gap: 10,
     padding: "10px 12px",
     borderRadius: 7,
-    border: "1px solid " + (dragOver ? "var(--accent)" : "var(--border)"),
-    background: "var(--bg-elevated)",
+    border: "1px solid " + (dragOver ? "var(--accent)" : flagged ? "var(--crit)" : "var(--border)"),
+    background: flagged ? "var(--crit-bg)" : "var(--bg-elevated)",
     marginBottom: 6,
-    opacity: disabled ? 0.55 : 1,
+    opacity: disabled && !flagged ? 0.55 : 1,
   }),
   handle: (draggable: boolean): CSSProperties => ({
     display: "flex",

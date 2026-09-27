@@ -6,8 +6,10 @@ import { FormField, TextInput, SelectInput, Textarea, Toggle, Button, Badge } fr
 import type { Skill, SkillType } from "@devdigest/shared";
 import { useUpdateSkill } from "../../../../../../../lib/hooks/skills";
 import { useToast } from "../../../../../../../lib/toast";
+import { approxTokens } from "../../../../../../../lib/tokens";
+import { slugFilename } from "../../../../../../../lib/skill-filename";
 import { SKILL_TYPE_VALUES } from "./constants";
-import { approxTokens, formFromSkill, formToPatch, isDirty, slugFilename, type ConfigForm } from "./helpers";
+import { formFromSkill, formToPatch, isDirty, type ConfigForm } from "./helpers";
 import { s } from "./styles";
 
 /**
@@ -29,13 +31,22 @@ export function ConfigTab({ skill }: { skill: Skill }) {
   const tokens = approxTokens(body);
   const typeOptions = SKILL_TYPE_VALUES.map((v) => ({ value: v, label: t(`listItem.type.${v}`) }));
 
+  // A body with prompt-injection patterns keeps the skill off server-side;
+  // the toggle mirrors that instead of offering a switch the API will refuse.
+  const blocked = skill.injection?.detected ?? false;
+
   const save = () =>
     update.mutate(
       { id: skill.id, patch: formToPatch(form) },
       {
         // Failures are surfaced by the global mutation error toast; confirm the
         // save with a success toast (not just the inline "Saved (vN)" note).
-        onSuccess: (data) => toast.success(t("config.savedToast", { version: data.version })),
+        onSuccess: (data) => {
+          // The server may have switched `enabled` off (injection) — adopt what
+          // was actually saved so the form isn't left "unsaved".
+          setForm(formFromSkill(data));
+          toast.success(t("config.savedToast", { version: data.version }));
+        },
       },
     );
 
@@ -48,9 +59,12 @@ export function ConfigTab({ skill }: { skill: Skill }) {
             {t("config.unsaved")}
           </Badge>
         )}
-        <label style={s.enabledLabel}>
+        <label style={s.enabledLabel} title={blocked ? t("injection.toggleBlocked") : undefined}>
           {t("config.enabled")}
-          <Toggle on={enabled} onChange={field("enabled")} size={16} />
+          <span style={blocked ? s.blockedToggle : undefined}>
+            {/* vendor/ui Toggle has no `disabled` — a no-op handler + dimming. */}
+            <Toggle on={enabled && !blocked} onChange={blocked ? () => {} : field("enabled")} size={16} />
+          </span>
         </label>
       </div>
       <FormField label={t("config.name")} required>

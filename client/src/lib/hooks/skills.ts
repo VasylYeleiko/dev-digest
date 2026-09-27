@@ -96,3 +96,10 @@ export function useImportSkill() {
     mutationFn: (input: ImportSkillInput) => api.post<SkillImportPreview>("/skills/import", input),
   });
 }
+
+/** Fetch a skill file from a URL server-side (SSRF-guarded) into a preview — nothing persists. */
+export function useImportSkillFromUrl() {
+  return useMutation({
+    mutationFn: (url: string) => api.post<SkillImportPreview>("/skills/import-url", { url }),
+  });
+}

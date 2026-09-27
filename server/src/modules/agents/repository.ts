@@ -1,10 +1,10 @@
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray } from 'drizzle-orm';
 import type { Db, DbTx } from '../../db/client.js';
 import * as t from '../../db/schema.js';
 import { DEFAULT_AGENT_DESCRIPTION, INITIAL_AGENT_VERSION } from './constants.js';
 import { isConfigChange } from './helpers.js';
 import type { AgentStore, InsertAgent, UpdateAgent } from './ports.js';
-import type { AgentEntity, AgentVersionEntity, LinkedSkill } from './types.js';
+import type { AgentEntity, AgentVersionEntity, LinkedSkill, SkillAttachState } from './types.js';
 
 /**
  * A2 — agents data-access (ring 3); implements `AgentStore`. Owns `agents`,
@@ -172,6 +172,18 @@ export class AgentsRepository implements AgentStore {
 
   // ---- agent_skills link table (A2 owns the agent side) -------------------
 
+  /** Linked-skill count per agent of `workspaceId` (absent ⇒ 0). One grouped query. */
+  async skillCounts(workspaceId: string, agentIds: string[]): Promise<Map<string, number>> {
+    if (agentIds.length === 0) return new Map();
+    const rows = await this.db
+      .select({ agentId: t.agentSkills.agentId, count: count() })
+      .from(t.agentSkills)
+      .innerJoin(t.agents, eq(t.agentSkills.agentId, t.agents.id))
+      .where(and(eq(t.agents.workspaceId, workspaceId), inArray(t.agentSkills.agentId, agentIds)))
+      .groupBy(t.agentSkills.agentId);
+    return new Map(rows.map((r) => [r.agentId, r.count]));
+  }
+
   /** Skills linked to an agent, in `order` ascending. */
   async linkedSkills(agentId: string): Promise<LinkedSkill[]> {
     return this.db
@@ -216,14 +228,13 @@ export class AgentsRepository implements AgentStore {
     });
   }
 
-  /** Of `skillIds`, the subset that are disabled. Empty input short-circuits
-   *  (an empty `inArray` still round-trips to the DB otherwise). */
-  async disabledSkillIds(skillIds: string[]): Promise<string[]> {
+  /** Attach state of those `skillIds` that live in `workspaceId`. Empty input
+   *  short-circuits (an empty `inArray` still round-trips to the DB otherwise). */
+  async skillAttachState(workspaceId: string, skillIds: string[]): Promise<SkillAttachState[]> {
     if (skillIds.length === 0) return [];
-    const rows = await this.db
-      .select({ id: t.skills.id })
+    return this.db
+      .select({ id: t.skills.id, enabled: t.skills.enabled, name: t.skills.name, body: t.skills.body })
       .from(t.skills)
-      .where(and(inArray(t.skills.id, skillIds), eq(t.skills.enabled, false)));
-    return rows.map((r) => r.id);
+      .where(and(eq(t.skills.workspaceId, workspaceId), inArray(t.skills.id, skillIds)));
   }
 }

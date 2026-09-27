@@ -10,6 +10,7 @@ import type {
 import { reviewPullRequest, countBlockers } from '@devdigest/reviewer-core';
 import { RunLogger } from '../../platform/run-logger.js';
 import { approxTokens } from '../../platform/tokens.js';
+import { scanSkill } from '../../platform/prompt-injection.js';
 import type { AgentEntity } from '../agents/index.js';
 import type { PullEntity, PullStore } from '../pulls/index.js';
 import type { RepoEntity } from '../repos/index.js';
@@ -213,7 +214,15 @@ export class ReviewRunExecutor {
       // very next review. skillsTokens is the ONLY per-slot token count we
       // compute client-side of the LLM call (repo-map/callers ride inside
       // tokens_in); it's what the trace's "Skills" block shows as "added".
-      const linked = await this.deps.skills.resolveForAgent(agent.id);
+      // A skill body goes in as TRUSTED instructions, outside INJECTION_GUARD's
+      // reach — so one carrying injection patterns is dropped here too (defense
+      // in depth: it's also kept disabled and unattachable), and the run log
+      // says so instead of silently changing the prompt.
+      const resolved = await this.deps.skills.resolveForAgent(agent.id);
+      const linked = resolved.filter((s) => !scanSkill(s.name, s.body).detected);
+      for (const s of resolved) {
+        if (!linked.includes(s)) runLog.info(`skills: skipped "${s.name}" — prompt-injection patterns in its name or body`);
+      }
       const skillBlocks = linked.map((s) => `### ${s.name}\n${s.body}`);
       const skillsTokens = skillBlocks.length ? approxTokens(skillBlocks.join('\n\n')) : null;
       if (skillBlocks.length) runLog.info(`skills: ${skillBlocks.length} linked skill(s) attached`);

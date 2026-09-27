@@ -75,6 +75,10 @@ class) but with your own `open` state + outside-click listener. Evidence:
 
 ## Codebase Patterns
 
+### 2026-09-26 — a `vendor/ui` `Modal`/`Drawer` opened from inside a clickable card bubbles every click to the card's `onClick`
+
+`Modal` and `Drawer` render in place (fixed-position divs, no portal — see the 2026-09-20 portal entry), so they stay inside the card in the React tree: clicking Cancel in a delete-confirmation modal also fired the card's `onClick` and opened the skill preview. Wrap the modal in `<div onClick={(e) => e.stopPropagation()}>` wherever it's rendered inside a clickable parent. Evidence: `src/app/skills/_components/SkillCard/SkillCard.tsx`, `src/app/agents/_components/AgentCard/AgentCard.tsx`, `SkillCard.test.tsx` ("Clicks inside the modal never reach the card").
+
 ### 2026-09-23 — a component rendered once per review run must not own a bare `window` keydown listener
 
 `ReviewRunAccordion` renders one `FindingsPanel` per expanded run, so a

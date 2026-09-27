@@ -1,26 +1,31 @@
-/* /skills — Skills list. SkillCards + an Add-Skill import drawer. Selecting a
-   skill navigates to the tabbed Skill Editor at /skills/:id. Mirrors
-   AgentsListView. */
+/* /skills — Skills list. SkillCards, an Add-Skill menu (create from scratch in
+   a modal, or import via the drawer), and a side-panel preview: clicking a card
+   opens it; the panel's "Open editor" goes to the tabbed Skill Editor at
+   /skills/:id. Mirrors AgentsListView. */
 "use client";
 
 import React from "react";
-import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Button, Dropdown, EmptyState, ErrorState, Skeleton, Icon } from "@devdigest/ui";
 import { AppShell } from "../../../../components/app-shell";
 import { useSkills, useUpdateSkill } from "../../../../lib/hooks/skills";
 import { SkillCard } from "../SkillCard";
 import { AddSkillDrawer, type AddSkillDrawerTab } from "../AddSkillDrawer";
+import { CreateSkillModal } from "../CreateSkillModal";
+import { SkillPreviewPanel } from "../SkillPreviewPanel";
 import { filterSkills } from "./helpers";
 import { s } from "./styles";
 
 export function SkillsListView() {
   const t = useTranslations("skills");
-  const router = useRouter();
   const { data: skills, isLoading, isError, refetch } = useSkills();
   const update = useUpdateSkill();
   const [search, setSearch] = React.useState("");
   const [drawerTab, setDrawerTab] = React.useState<AddSkillDrawerTab | null>(null);
+  const [creating, setCreating] = React.useState(false);
+  const [previewId, setPreviewId] = React.useState<string | null>(null);
+  // Looked up from the live list so the panel reflects toggles/edits.
+  const previewed = previewId ? (skills ?? []).find((sk) => sk.id === previewId) : undefined;
 
   const list = filterSkills(skills ?? [], search);
   const openDrawer = (tab: AddSkillDrawerTab) => setDrawerTab(tab);
@@ -28,6 +33,8 @@ export function SkillsListView() {
   return (
     <AppShell crumb={[{ label: t("page.crumbLab") }, { label: t("page.crumbSkills") }]}>
       {drawerTab && <AddSkillDrawer initialTab={drawerTab} onClose={() => setDrawerTab(null)} />}
+      {creating && <CreateSkillModal onClose={() => setCreating(false)} />}
+      {previewed && <SkillPreviewPanel skill={previewed} onClose={() => setPreviewId(null)} />}
       <div style={s.page}>
         <div style={s.header}>
           <div style={s.headerText}>
@@ -51,6 +58,7 @@ export function SkillsListView() {
               </Button>
             }
             items={[
+              { label: t("page.menu.create"), icon: "Plus", onClick: () => setCreating(true) },
               { label: t("page.menu.fromFile"), icon: "Upload", onClick: () => openDrawer("file") },
               { label: t("page.menu.fromUrl"), icon: "Link", onClick: () => openDrawer("url") },
               { label: t("page.menu.community"), icon: "Globe", onClick: () => openDrawer("community") },
@@ -81,7 +89,8 @@ export function SkillsListView() {
               <SkillCard
                 key={sk.id}
                 sk={sk}
-                onClick={() => router.push(`/skills/${sk.id}?tab=config`)}
+                active={sk.id === previewId}
+                onClick={() => setPreviewId(sk.id)}
                 onToggle={(enabled) => update.mutate({ id: sk.id, patch: { enabled } })}
               />
             ))}

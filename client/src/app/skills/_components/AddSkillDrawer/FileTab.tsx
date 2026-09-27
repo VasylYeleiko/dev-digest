@@ -1,18 +1,18 @@
-/* FileTab — the only interactive tab of AddSkillDrawer. Pick a .md/.zip file,
-   parse it server-side into a preview (nothing persists), let the user tweak
-   name/type before confirming, then create the skill. */
+/* FileTab — pick a .md/.zip file, parse it server-side into a preview
+   (nothing persists), let the user tweak it before confirming, then create
+   the skill. The preview form is shared with UrlTab. */
 "use client";
 
 import React from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Button, FormField, TextInput, SelectInput, Textarea, Badge, Icon } from "@devdigest/ui";
-import type { SkillImportPreview, SkillType } from "@devdigest/shared";
+import { Icon } from "@devdigest/ui";
+import type { SkillImportPreview } from "@devdigest/shared";
 import { useCreateSkill, useImportSkill } from "../../../../lib/hooks/skills";
 import { ApiError } from "../../../../lib/api";
 import { useToast } from "../../../../lib/toast";
-import { SKILL_TYPE_VALUES } from "./constants";
 import { fileToBase64 } from "./helpers";
+import { ImportPreviewForm } from "./ImportPreviewForm";
 import { s } from "./styles";
 
 export function FileTab({ onClose }: { onClose: () => void }) {
@@ -37,11 +37,6 @@ export function FileTab({ onClose }: { onClose: () => void }) {
       setError(e instanceof ApiError ? e.message : t("drawer.importFailed"));
     }
   };
-
-  const field =
-    <K extends keyof SkillImportPreview>(key: K) =>
-    (value: SkillImportPreview[K]) =>
-      setPreview((p) => (p ? { ...p, [key]: value } : p));
 
   const save = () => {
     if (!preview) return;
@@ -79,36 +74,7 @@ export function FileTab({ onClose }: { onClose: () => void }) {
       {error && <div style={s.error}>{error}</div>}
 
       {preview && (
-        <div>
-          <div style={s.notice}>
-            <Icon.AlertTriangle size={16} style={{ flexShrink: 0, color: "var(--warn, #b45309)" }} />
-            <span>{t("preview.untrustedNotice")}</span>
-          </div>
-          <Badge icon="AlertTriangle" color="var(--warn, #b45309)" style={{ marginBottom: 16 }}>
-            {t("preview.untrustedBadge")}
-          </Badge>
-          <FormField label={t("file.nameLabel")} hint={t("file.nameHint")}>
-            <TextInput value={preview.name} onChange={field("name")} placeholder={t("file.namePlaceholder")} />
-          </FormField>
-          <FormField label="Description">
-            <TextInput value={preview.description} onChange={field("description")} />
-          </FormField>
-          <FormField label="Type">
-            <SelectInput
-              value={preview.type}
-              onChange={(v) => field("type")(v as SkillType)}
-              options={[...SKILL_TYPE_VALUES]}
-            />
-          </FormField>
-          <FormField label={t("file.bodyLabel")}>
-            <Textarea value={preview.body} onChange={field("body")} rows={8} mono />
-          </FormField>
-          <div style={s.actions}>
-            <Button kind="primary" icon="Check" onClick={save} disabled={createSkill.isPending}>
-              {createSkill.isPending ? t("file.importing") : t("preview.save")}
-            </Button>
-          </div>
-        </div>
+        <ImportPreviewForm preview={preview} onChange={setPreview} onSave={save} saving={createSkill.isPending} />
       )}
     </div>
   );

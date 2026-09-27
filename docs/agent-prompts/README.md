@@ -10,6 +10,9 @@ in the DB). The canonical, reviewable copies live next to this file:
 - [`security-reviewer.md`](./security-reviewer.md)
 - [`performance-reviewer.md`](./performance-reviewer.md)
 - [`test-quality-reviewer.md`](./test-quality-reviewer.md)
+- [`api-contract-reviewer.md`](./api-contract-reviewer.md) — a deliberately thin
+  shell: its policy (what counts as breaking, schema, semver, deprecation rules)
+  comes from linked skills, so linking/unlinking a skill visibly changes what it flags.
 
 > The DB is the source of truth at run time. These files are the human-readable
 > originals — when you change a prompt, edit the file here **and** push it to the

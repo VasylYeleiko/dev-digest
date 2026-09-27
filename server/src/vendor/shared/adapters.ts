@@ -408,6 +408,32 @@ export interface SourceFiles {
   walk(root: string): Promise<WalkResult>;
 }
 
+// ---------- Outbound HTTP (skill import from URL) ----------
+export interface HttpFetchOptions {
+  /** Abort (and fail) once the body exceeds this many bytes. */
+  maxBytes: number;
+  timeoutMs: number;
+  /** Each hop is re-checked against the SSRF policy before it is followed. */
+  maxRedirects: number;
+}
+
+export interface HttpFetchResult {
+  /** The URL that finally answered (after redirects). */
+  url: string;
+  status: number;
+  contentType: string | null;
+  body: Uint8Array;
+}
+
+/**
+ * GET a user-supplied URL, SSRF-safely: https only, every resolved address and
+ * every redirect hop must be public. Throws `ValidationError` for a refused
+ * URL / oversized body, `ExternalServiceError` for network or upstream errors.
+ */
+export interface HttpFetcher {
+  fetch(url: string, opts: HttpFetchOptions): Promise<HttpFetchResult>;
+}
+
 export interface FileEdge {
   from: string;
   to: string;

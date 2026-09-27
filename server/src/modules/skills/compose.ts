@@ -14,5 +14,5 @@ export function createSkillStore(c: Container): SkillStore {
 }
 
 export function createSkillsService(c: Container): SkillsService {
-  return new SkillsService({ skills: createSkillStore(c) });
+  return new SkillsService({ skills: createSkillStore(c), http: c.http });
 }

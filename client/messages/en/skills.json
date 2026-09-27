@@ -7,6 +7,7 @@
     "searchPlaceholder": "Search skills…",
     "loadError": "Could not load skills.",
     "menu": {
+      "create": "Create skill",
       "fromFile": "Import from file",
       "fromUrl": "Import from URL",
       "community": "Search community skills…"
@@ -57,7 +58,8 @@
     "placeholder": "https://example.com/skills/security.md",
     "fetching": "Fetching…",
     "import": "Import from URL",
-    "success": "Imported \"{name}\". Disabled until you vet + enable it."
+    "success": "Imported \"{name}\". Disabled until you vet + enable it.",
+    "fetch": "Fetch preview"
   },
   "community": {
     "searchPlaceholder": "Search community skills (e.g. security)…",
@@ -85,7 +87,9 @@
       "extracted": "Extracted",
       "community": "Community",
       "imported_url": "Imported"
-    }
+    },
+    "version": "v{version}",
+    "agentCount": "{count, plural, =0 {No agents} one {# agent} other {# agents}}"
   },
   "preview": {
     "untrustedBadge": "untrusted source",
@@ -154,5 +158,53 @@
   },
   "evals": {
     "comingSoon": "Coming soon — no eval runner exists yet."
+  },
+  "injection": {
+    "badge": "Injection detected",
+    "blockedTitle": "INJECTION DETECTED — DO NOT ENABLE",
+    "blockedBody": "This skill contains prompt injection patterns. It has been automatically blocked — fix the lines below and save; it can be enabled once none remain.",
+    "importTitle": "Prompt injection detected",
+    "importBody": "This file contains prompt injection patterns. It will be imported disabled and can't be attached to agents until the lines below are fixed.",
+    "line": "line {line}",
+    "nameLine": "skill name",
+    "toggleBlocked": "Blocked — fix the prompt-injection patterns first",
+    "attachBlocked": "Contains prompt-injection patterns — fix it on the Skills page before attaching",
+    "rule": {
+      "ignore_instructions": "Tells the model to ignore its instructions",
+      "role_override": "Tries to give the model a new role or remove its limits",
+      "fake_role_header": "Impersonates a system/assistant message",
+      "safety_override": "Tries to override safety guidelines",
+      "forced_verdict": "Forces an approval or a score",
+      "suppress_security": "Suppresses security findings",
+      "prompt_exfiltration": "Asks the model to reveal its prompt or configuration",
+      "hidden_characters": "Contains invisible or direction-changing characters",
+      "hidden_comment_instruction": "Hides instructions in an HTML comment",
+      "unknown": "Suspicious instruction"
+    }
+  },
+  "deleteModal": {
+    "title": "Delete skill?",
+    "body": "“{name}” will be deleted with all its versions and unlinked from {count, plural, =0 {every agent} one {# agent} other {# agents}}. This cannot be undone."
+  },
+  "previewPanel": {
+    "openEditor": "Open editor",
+    "close": "Close",
+    "empty": "This skill has no body yet."
+  },
+  "create": {
+    "title": "Create skill",
+    "subtitle": "A reusable Markdown block that agents add to their prompt.",
+    "name": "Name",
+    "namePlaceholder": "e.g. breaking-change",
+    "description": "Description",
+    "descriptionPlaceholder": "What this skill checks — one directive sentence",
+    "type": "Type",
+    "enabled": "Enabled",
+    "body": "Skill body (Markdown)",
+    "bodyHint": "{filename} · ~{count} tokens",
+    "cancel": "Cancel",
+    "create": "Create skill",
+    "creating": "Creating…",
+    "success": "Created “{name}”."
   }
 }

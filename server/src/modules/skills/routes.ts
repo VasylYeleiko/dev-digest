@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
-import { CreateSkillRequest, UpdateSkillRequest } from '@devdigest/shared';
+import { CreateSkillRequest, ImportSkillUrlRequest, UpdateSkillRequest } from '@devdigest/shared';
 import { requestContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { NotFoundError } from '../../platform/errors.js';
@@ -18,6 +18,8 @@ const VersionParams = z.object({
  * multipart plugin). Not a shared contract: it's this route's own request
  * shape, distinct from the `SkillImportPreview` it returns.
  */
+const IMPORT_URL_RATE_LIMIT = { max: 10, timeWindow: '1 minute' };
+
 const ImportSkillBody = z.object({
   filename: z.string().min(1),
   content_base64: z.string().min(1),
@@ -34,6 +36,7 @@ const ImportSkillBody = z.object({
  *   GET    /skills/:id/versions/:version → one body snapshot
  *   GET    /skills/:id/stats      → Stats-tab data
  *   POST   /skills/import         → parse `.md`/`.zip` → preview; persists nothing
+ *   POST   /skills/import-url     → fetch a skill file from a URL (SSRF-guarded) → preview; persists nothing
  */
 export default async function skillsRoutes(appBase: FastifyInstance) {
   const app = appBase.withTypeProvider<ZodTypeProvider>();
@@ -106,4 +109,14 @@ export default async function skillsRoutes(appBase: FastifyInstance) {
     await ctx(req);
     return service.importPreview(req.body.filename, req.body.content_base64);
   });
+
+  // Outbound fetch on the user's behalf — tighter than the global 120/min.
+  app.post(
+    '/skills/import-url',
+    { schema: { body: ImportSkillUrlRequest }, config: { rateLimit: IMPORT_URL_RATE_LIMIT } },
+    async (req) => {
+      await ctx(req);
+      return service.importFromUrl(req.body.url);
+    },
+  );
 }

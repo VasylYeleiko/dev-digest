@@ -14,5 +14,6 @@ export const s = {
     color: "var(--text-secondary)",
   } satisfies CSSProperties,
   actions: { display: "flex", gap: 10, marginTop: 10 } satisfies CSSProperties,
+  blockedToggle: { opacity: 0.45, cursor: "not-allowed", display: "inline-flex" } satisfies CSSProperties,
   savedNote: { alignSelf: "center", fontSize: 13, color: "var(--ok)" } satisfies CSSProperties,
 } as const;

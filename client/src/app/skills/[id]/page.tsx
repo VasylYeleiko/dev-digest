@@ -8,8 +8,10 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Button, Dropdown, ErrorState, Skeleton, Icon, Badge } from "@devdigest/ui";
 import { AppShell } from "../../../components/app-shell";
+import { InjectionBadge } from "../../../components/InjectionBadge";
 import { SkillCard } from "../_components/SkillCard";
 import { AddSkillDrawer, type AddSkillDrawerTab } from "../_components/AddSkillDrawer";
+import { CreateSkillModal } from "../_components/CreateSkillModal";
 import { SkillEditor } from "./_components/SkillEditor";
 import { VALID_TABS } from "./_components/SkillEditor/constants";
 import { useSkills, useSkill, useUpdateSkill } from "../../../lib/hooks/skills";
@@ -26,6 +28,7 @@ export default function SkillEditorPage() {
   const { data: skill, isLoading, isError, error, refetch } = useSkill(id);
   const update = useUpdateSkill();
   const [drawerTab, setDrawerTab] = React.useState<AddSkillDrawerTab | null>(null);
+  const [creating, setCreating] = React.useState(false);
 
   const tab = VALID_TABS.includes(search.get("tab") ?? "") ? search.get("tab")! : "config";
   const setTab = (tb: string) => {
@@ -56,6 +59,7 @@ export default function SkillEditorPage() {
   return (
     <AppShell crumb={crumb}>
       {drawerTab && <AddSkillDrawer initialTab={drawerTab} onClose={() => setDrawerTab(null)} />}
+      {creating && <CreateSkillModal onClose={() => setCreating(false)} />}
       <div style={{ display: "flex", height: "calc(100vh - 52px)" }}>
         {/* left: skill list */}
         <div
@@ -80,6 +84,7 @@ export default function SkillEditorPage() {
                   </Button>
                 }
                 items={[
+                  { label: t("page.menu.create"), icon: "Plus", onClick: () => setCreating(true) },
                   { label: t("page.menu.fromFile"), icon: "Upload", onClick: () => setDrawerTab("file") },
                   { label: t("page.menu.fromUrl"), icon: "Link", onClick: () => setDrawerTab("url") },
                   { label: t("page.menu.community"), icon: "Globe", onClick: () => setDrawerTab("community") },
@@ -115,7 +120,11 @@ export default function SkillEditorPage() {
               <Badge color="var(--text-secondary)" mono>
                 {t("preview.version", { version: skill.version })}
               </Badge>
-              {!skill.enabled && <Badge color="var(--text-muted)">{t("preview.disabled")}</Badge>}
+              {skill.injection?.detected ? (
+                <InjectionBadge />
+              ) : (
+                !skill.enabled && <Badge color="var(--text-muted)">{t("preview.disabled")}</Badge>
+              )}
               <div style={{ marginLeft: "auto" }}>
                 <Button kind="secondary" size="sm" icon="FlaskConical" disabled title={t("evals.comingSoon")}>
                   {t("editor.runOnEvals")}

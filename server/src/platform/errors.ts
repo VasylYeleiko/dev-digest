@@ -28,6 +28,13 @@ export class ValidationError extends AppError {
   }
 }
 
+/** The request is valid but the resource isn't in a state that allows it (e.g. repo not cloned yet). */
+export class ConflictError extends AppError {
+  constructor(message: string, details?: unknown) {
+    super('conflict', message, 409, details);
+  }
+}
+
 export class ExternalServiceError extends AppError {
   constructor(message: string, details?: unknown) {
     super('external_service_error', message, 502, details);

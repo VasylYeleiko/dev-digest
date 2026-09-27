@@ -94,9 +94,14 @@
     "orderHint": "Order matters — earlier skills appear earlier in the assembled prompt. Drag to reorder.",
     "disabledBadge": "Disabled",
     "disabledHint": "Enable this skill on the Skills page to attach it.",
-    "dragHandle": "Drag to reorder"
+    "dragHandle": "Drag to reorder",
+    "injectionHint": "Contains prompt-injection patterns — fix it on the Skills page before attaching."
   },
   "mount": {
     "body": "Mount point for {owner}. The Agent Editor shell + tab routing are wired by A2 — {owner} renders this tab."
+  },
+  "deleteModal": {
+    "title": "Delete agent?",
+    "body": "“{name}” will be deleted from the database. Its past review runs keep their history. This cannot be undone."
   }
 }

@@ -43,21 +43,3 @@ export function isDirty(form: ConfigForm, skill: Skill): boolean {
     form.enabled !== skill.enabled
   );
 }
-
-/** Approximate prompt tokens contributed by this skill's body. Mirrors the
- *  server's `approxTokens` heuristic (reviewer-core's tokenizer adapter:
- *  ~4 chars/token) so the live counter matches what the run trace will show
- *  as `skills_tokens` once this skill is linked to an agent. */
-export function approxTokens(body: string): number {
-  return Math.ceil(body.length / 4);
-}
-
-/** `{slug-of-name}.md` — the filename shown under the body field. */
-export function slugFilename(name: string): string {
-  const slug = name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-+|-+$)/g, "");
-  return `${slug || "skill"}.md`;
-}

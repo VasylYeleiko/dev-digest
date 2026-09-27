@@ -26,5 +26,10 @@
     "title": "Page not found",
     "body": "There's nothing at this address. The link may be stale or mistyped.",
     "cta": "Go to the dashboard"
+  },
+  "confirmDelete": {
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deleting": "Deleting…"
   }
 }

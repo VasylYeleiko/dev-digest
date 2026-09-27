@@ -8,6 +8,7 @@ import {
   SECURITY_REVIEWER_PROMPT,
   PERFORMANCE_REVIEWER_PROMPT,
   TEST_QUALITY_REVIEWER_PROMPT,
+  API_CONTRACT_REVIEWER_PROMPT,
 } from './seed-prompts.js';
 
 /** Default provider/model for the built-in reviewer agents. */
@@ -241,6 +242,123 @@ Before approving, confirm the diff's tests try these inputs where relevant:
       enabled: true,
       version: 1,
     },
+    // ---- API Contract Reviewer's policy (the agent prompt is a thin shell; ----
+    // ---- these rules decide what counts as a contract problem).            ----
+    // The 4th, `deprecation-policy`, is NOT seeded: it lives in
+    // docs/skills/deprecation-policy.md and is imported by URL in the demo.
+    {
+      workspaceId,
+      name: 'breaking-change',
+      description: 'Flag any change that makes an existing, correct client request fail or misread the response.',
+      type: 'rubric',
+      source: 'manual',
+      body: `# Breaking change
+
+Treat the HTTP API as a contract with clients you can't see. Report as **CRITICAL**
+any change in this diff after which an existing, correct client request fails or
+a client reads wrong data:
+
+- A route removed or renamed, or its method changed.
+- A path/query param renamed or removed, or an optional one made required.
+- A request body field renamed or removed, made required, or its type narrowed.
+- A response field removed or renamed, its type changed, or it became nullable.
+- A different status code for an existing outcome (200 → 201, 404 → 422).
+- An enum value removed or renamed in a request or response.
+
+Additive changes are NOT breaking: a new route, a new optional request field, a
+new response field, a new enum value. Do not flag those.
+
+Name the client-visible difference in the finding: "clients calling
+\`GET /skills/:id/versions\` now get 404", "clients reading \`name\` get \`undefined\`".
+
+## Bad — renames a response field clients already read
+\`\`\`ts
+// before: return { id: row.id, name: row.name };
+return { id: row.id, title: row.name };
+\`\`\`
+
+## Good — adds the new field and keeps the old one
+\`\`\`ts
+return { id: row.id, name: row.name, title: row.name };
+\`\`\``,
+      enabled: true,
+      version: 1,
+    },
+    {
+      workspaceId,
+      name: 'response-schema',
+      description: 'Require every route to validate its input and return exactly its declared zod contract.',
+      type: 'convention',
+      source: 'manual',
+      body: `# Response schema
+
+Every route's params, query and body are validated by a zod schema in the route
+options, and its response is the zod contract from \`src/vendor/shared/contracts/*\`
+— mapped explicitly, snake_case on the wire.
+
+- **WARNING** — a route added or changed without a zod schema for the input it
+  reads (validation must reject bad input with 422 before the handler runs).
+- **WARNING** — a handler that returns a database row or entity as-is instead of
+  mapping it to the contract (leaks camelCase keys and internal columns).
+- **CRITICAL** — a contract changed in \`server/src/vendor/shared/contracts/\`
+  without the identical change in \`client/src/vendor/shared/contracts/\` (the web
+  app silently loses or misreads the field).
+
+## Bad — raw row on the wire, no input schema
+\`\`\`ts
+app.get('/skills/:id', async (req) => {
+  return db.select().from(skills).where(eq(skills.id, req.params.id));
+});
+\`\`\`
+
+## Good — validated input, explicit mapping to the contract
+\`\`\`ts
+app.get('/skills/:id', { schema: { params: IdParams } }, async (req) => {
+  const skill = await service.get(workspaceId, req.params.id);
+  if (!skill) throw new NotFoundError('Skill not found');
+  return skill; // already a \`Skill\` DTO built by toSkillDto()
+});
+\`\`\``,
+      enabled: true,
+      version: 1,
+    },
+    {
+      workspaceId,
+      name: 'semver-discipline',
+      description: 'Match the version bump to the change: breaking → major, additive → minor, fix → patch.',
+      type: 'convention',
+      source: 'manual',
+      body: `# Semver discipline
+
+When the diff changes a versioned artifact — a package's \`package.json\`
+\`version\`, a plugin manifest (\`plugin.json\`), an API version prefix — the bump
+must match the change it ships:
+
+- **MAJOR** — anything the breaking-change rule calls breaking.
+- **MINOR** — backward-compatible additions (a new route, an optional field).
+- **PATCH** — fixes that change no contract.
+
+Report:
+- **WARNING** — a breaking change shipped with a minor/patch bump or no bump,
+  when the diff touches a versioned artifact.
+- **SUGGESTION** — a bump larger than the change needs (major for a typo fix).
+- **WARNING** — a major bump with no migration note in the changelog or PR
+  description telling clients what to change.
+
+## Bad — removes a route, bumps patch
+\`\`\`diff
+- "version": "1.4.2"
++ "version": "1.4.3"   // same diff deletes GET /skills/:id/stats
+\`\`\`
+
+## Good — removal ships as a major with a migration note
+\`\`\`diff
+- "version": "1.4.2"
++ "version": "2.0.0"   // CHANGELOG: "GET /skills/:id/stats removed — use /skills/:id/usage"
+\`\`\``,
+      enabled: true,
+      version: 1,
+    },
   ];
   for (const s of seedSkills) {
     const [existing] = await db
@@ -303,6 +421,17 @@ Before approving, confirm the diff's tests try these inputs where relevant:
       version: 1,
       createdBy: userId,
     },
+    {
+      workspaceId,
+      name: 'API Contract Reviewer',
+      description: 'Checks a PR against the team\'s API rules: breaking changes, response schemas, semver, deprecation.',
+      provider: DEFAULT_PROVIDER,
+      model: DEFAULT_MODEL,
+      systemPrompt: API_CONTRACT_REVIEWER_PROMPT,
+      enabled: true,
+      version: 1,
+      createdBy: userId,
+    },
   ];
   for (const a of seedAgents) {
     const [existing] = await db
@@ -316,25 +445,20 @@ Before approving, confirm the diff's tests try these inputs where relevant:
   // `flake-guard` is intentionally NOT linked here — it isn't seeded (imported
   // by hand in the demo). Guarded per-link via onConflictDoNothing on the
   // (agentId, skillId) PK, so re-seeding never duplicates or reorders a link.
-  const [testQualityReviewer] = await db
-    .select()
-    .from(t.agents)
-    .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.name, 'Test Quality Reviewer')));
-  if (testQualityReviewer) {
-    const linkedSkillNames = ['branch-coverage-rubric', 'corner-case-checklist', 'mock-discipline'];
-    for (let i = 0; i < linkedSkillNames.length; i++) {
-      const [skill] = await db
-        .select()
-        .from(t.skills)
-        .where(and(eq(t.skills.workspaceId, workspaceId), eq(t.skills.name, linkedSkillNames[i]!)));
-      if (skill) {
-        await db
-          .insert(t.agentSkills)
-          .values({ agentId: testQualityReviewer.id, skillId: skill.id, order: i })
-          .onConflictDoNothing();
-      }
-    }
-  }
+  await linkSeedSkills(db, workspaceId, 'Test Quality Reviewer', [
+    'branch-coverage-rubric',
+    'corner-case-checklist',
+    'mock-discipline',
+  ]);
+
+  // ---- link API Contract Reviewer to its seeded policy skills (order 0..2) ----
+  // Same idempotent pattern as above. `deprecation-policy` is linked by hand
+  // after it's imported by URL (docs/skills/deprecation-policy.md).
+  await linkSeedSkills(db, workspaceId, 'API Contract Reviewer', [
+    'breaking-change',
+    'response-schema',
+    'semver-discipline',
+  ]);
 
   // ---- a demo agent run, backing the seeded review's PR timeline row ----
   // The review above is inserted with no run_id (agent_runs didn't exist yet
@@ -377,6 +501,28 @@ Before approving, confirm the diff's tests try these inputs where relevant:
   }
 
   return { workspaceId, userId };
+}
+
+/**
+ * Link seeded skills to a seeded agent in the given prompt order (0..n-1).
+ * Per-link `onConflictDoNothing` on the (agentId, skillId) PK, so re-seeding
+ * never duplicates or reorders a link the user has since rearranged.
+ */
+async function linkSeedSkills(db: Db, workspaceId: string, agentName: string, skillNames: string[]): Promise<void> {
+  const [agent] = await db
+    .select()
+    .from(t.agents)
+    .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.name, agentName)));
+  if (!agent) return;
+  for (let i = 0; i < skillNames.length; i++) {
+    const [skill] = await db
+      .select()
+      .from(t.skills)
+      .where(and(eq(t.skills.workspaceId, workspaceId), eq(t.skills.name, skillNames[i]!)));
+    if (skill) {
+      await db.insert(t.agentSkills).values({ agentId: agent.id, skillId: skill.id, order: i }).onConflictDoNothing();
+    }
+  }
 }
 
 // CLI entrypoint

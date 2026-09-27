@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 /** Co-located styles for AddSkillDrawer + its tab bodies. */
 export const s = {
   tabsBar: { marginBottom: 20 } satisfies CSSProperties,
+  urlForm: { marginBottom: 16 } satisfies CSSProperties,
   picker: {
     display: "flex",
     alignItems: "center",

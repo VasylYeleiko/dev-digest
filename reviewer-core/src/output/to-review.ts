@@ -81,7 +81,7 @@ export function neutralizeMarkdown(text: string): string {
     .map((part, i) =>
       i % 2 === 1
         ? part
-        : part.replace(/</g, '&lt;').replace(/(^|[^\w`])@(?=[A-Za-z0-9])/g, '$1@​'),
+        : part.replace(/</g, '&lt;').replace(/(^|[^\w`])@(?=[A-Za-z0-9])/g, '$1@\u200B'),
     )
     .join('');
 }

@@ -31,6 +31,10 @@ export interface UpdateSkill {
 export interface SkillStore {
   list(workspaceId: string): Promise<SkillEntity[]>;
   getById(workspaceId: string, id: string): Promise<SkillEntity | undefined>;
+  /** How many of THIS workspace's agents link each of `skillIds` (absent ⇒ 0). One grouped query. */
+  agentCounts(workspaceId: string, skillIds: string[]): Promise<Map<string, number>>;
+  /** Newest skill with exactly this name (names aren't unique — newest wins). */
+  findByName(workspaceId: string, name: string): Promise<SkillEntity | undefined>;
   /** Delete (versions cascade; agent_skills links cascade). False when not in the workspace. */
   deleteById(workspaceId: string, id: string): Promise<boolean>;
   /** Insert a skill AND record version 1 (immutable body snapshot). */

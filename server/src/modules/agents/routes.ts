@@ -103,9 +103,9 @@ export default async function agentsRoutes(appBase: FastifyInstance) {
 
   app.get('/agents/:id/skills', { schema: { params: IdParams } }, async (req) => {
     const { workspaceId } = await ctx(req);
-    const agent = await service.get(workspaceId, req.params.id);
-    if (!agent) throw new NotFoundError('Agent not found');
-    return service.skillLinks(req.params.id);
+    const links = await service.skillLinks(workspaceId, req.params.id);
+    if (!links) throw new NotFoundError('Agent not found');
+    return links;
   });
 
   app.post(

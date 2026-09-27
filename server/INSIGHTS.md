@@ -14,6 +14,10 @@ Written by the `engineering-insights` skill. Format:
 
 ## What Doesn't Work
 
+### 2026-09-27 — never write `\uXXXX` escapes in `platform/prompt-injection.ts` through the Edit tool; they land as the invisible characters themselves
+
+An Edit containing `/[\u200B-\u200F…]/` saved the actual zero-width and bidi code points, not the escape text. The regex still worked, but nobody could read or review it, and a reviewer flagged it. Always write escapes there with a small node script that emits `'\\u' + hex`. Before finishing, check with `/[\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\uFE00-\uFE0F]/g` over the file source that the count is 0. Tests must build hidden characters with `String.fromCodePoint(0x…)` for the same reason. Evidence: `src/platform/prompt-injection.ts` (`HIDDEN_CHARS`, `FOLD_STRIP`), `test/prompt-injection.test.ts`.
+
 ### 2026-09-25 — fixed the 2026-09-18 `indexer-pipeline.test.ts` Windows entry below — `writeFileAt` now uses `dirname(full)`
 
 Took the fix the 2026-09-18 entry named: `test/indexer-pipeline.test.ts`'s
@@ -50,6 +54,10 @@ with `git stash pop`. The fix, when someone takes it, is `dirname(full)`
 instead of the manual slash search. Evidence: `test/indexer-pipeline.test.ts:140-145`.
 
 ## Codebase Patterns
+
+### 2026-09-26 — `AgentsService.linkSkill` on an ALREADY-linked skill silently moves it to the end of the agent's prompt order
+
+With no `order` argument it upserts `order = existing.length`, so "make sure skill X is linked" code that just calls `linkSkill` reorders the user's drag-and-drop arrangement (prompt order is what criterion-14-style tests check). Any caller that only wants to *ensure* a link must read `skillLinks(agentId)` first and skip agents that already have it. Evidence: `src/modules/agents/service.ts` (`linkSkill`), `src/modules/conventions/service.ts` (`createSkill`), `test/conventions.it.test.ts` ("links it once").
 
 ### 2026-09-23 — delete-then-insert on a table with no unique key needs a transaction AND `advisoryXactLock`
 
@@ -102,6 +110,10 @@ editing both in lock-step or the client silently loses the field. Verify with
 — the only legitimate differences are comments.
 
 ## Tool & Library Notes
+
+### 2026-09-27 — fflate `unzipSync` never inflates past an entry's *declared* `originalSize` — filter on it to stop zip bombs
+
+`unzipSync(bytes)` inflates every entry, so the 2 MB archive cap (`MAX_IMPORT_BYTES`) does not bound memory. Use the `filter` callback instead: one pass that returns `false` lists names without inflating anything, and a second pass inflates only the chosen `.md` when `f.originalSize <= MAX_UNZIPPED_SKILL_BYTES`. A lying header does not get around this: with the size patched to 100 bytes on a 50 MB payload, fflate returned exactly 100 bytes. Evidence: `src/modules/skills/helpers.ts` (`parseSkillFile`), `test/skills-helpers.test.ts` ("zip bomb").
 
 ### 2026-09-26 — dependency-cruiser resolves tsconfig `paths` against `process.cwd()`, not the tsconfig's dir
 
@@ -159,6 +171,14 @@ won't throw, but it will actually attempt one and make the test slow/flaky).
 Evidence: `test/container-llm.test.ts`, `src/platform/container.ts:140-151`.
 
 ## Decisions
+
+### 2026-09-27 — supersedes the 2026-09-26 `skillAttachState` entry below: the attach check is now workspace-scoped and rejects unknown ids
+
+`rejectDisabled` was renamed `rejectUnattachable(workspaceId, ids)`, and `AgentStore.skillAttachState(workspaceId, ids)` now filters on `skills.workspace_id`. An id missing from the result, whether it doesn't exist or belongs to another workspace, is a 422 `Unknown skill` before the disabled/injection checks. Previously such an id went straight to the `agent_skills` insert: an FK 500 for a bogus id, or a foreign skill's body in this agent's prompt. Evidence: `src/modules/agents/service.ts` (`rejectUnattachable`), `test/agents-skills.it.test.ts` ("another workspace's skill").
+
+### 2026-09-26 — supersedes the `disabledSkillIds` entry below: attach checks are now `skillAttachState`, and a skill body with prompt-injection patterns is saved but forced OFF
+
+`AgentStore.disabledSkillIds` is gone — `rejectDisabled` reads `skillAttachState(ids)` (`enabled` + `body`) and refuses a newly attached skill that is disabled OR trips `scanForInjection` (`src/platform/prompt-injection.ts`); already-linked skills stay exempt as before. `SkillsService.update` refuses only a `false → true` enable of a flagged skill — every other save of a flagged body goes through with `enabled: false`, because the Skill editor's `ConfigTab` always re-sends `enabled`, so "refuse any patch with `enabled: true`" 422'd a user who pasted an injection into an already-enabled skill. `run-executor` also drops flagged skills from the prompt and logs `skills: skipped "<name>"`. Evidence: `src/modules/skills/service.ts` (`update`), `src/modules/agents/service.ts` (`rejectDisabled`), `test/skills-service.test.ts` ("pasting an injection into an enabled skill").
 
 ### 2026-09-26 — depgraph cruises once per nearest-`tsconfig.json` group (answers the 2026-09-26 Open Question)
 

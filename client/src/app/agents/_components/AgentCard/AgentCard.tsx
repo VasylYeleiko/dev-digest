@@ -1,5 +1,6 @@
-/* AgentCard — model chip, skills count, enabled toggle. Stats are an A5 mount;
-   we render the provider/model + skill count here. */
+/* AgentCard — model chip, skills count, enabled toggle, and Delete (with a
+   confirmation modal). Stats are an A5 mount; we render the provider/model +
+   skill count here. */
 "use client";
 
 import React from "react";
@@ -7,6 +8,7 @@ import { useTranslations } from "next-intl";
 import { Icon, Badge, Toggle } from "@devdigest/ui";
 import type { Agent } from "@devdigest/shared";
 import { useDeleteAgent } from "../../../../lib/hooks/agents";
+import { ConfirmDeleteModal } from "../../../../components/ConfirmDeleteModal";
 import { modelColor } from "./helpers";
 import { s } from "./styles";
 
@@ -25,6 +27,7 @@ export function AgentCard({
 }) {
   const t = useTranslations("agents");
   const del = useDeleteAgent();
+  const [confirming, setConfirming] = React.useState(false);
   const color = modelColor(ag.model);
   return (
     <div onClick={onClick} style={s.card(!!active, ag.enabled)}>
@@ -41,7 +44,7 @@ export function AgentCard({
         <button
           onClick={(e) => {
             e.stopPropagation();
-            if (window.confirm(`Delete agent "${ag.name}"? This cannot be undone.`)) del.mutate(ag.id);
+            setConfirming(true);
           }}
           disabled={del.isPending}
           title="Delete agent"
@@ -69,6 +72,18 @@ export function AgentCard({
           </Badge>
         )}
       </div>
+      {confirming && (
+        // The modal renders inside the card: keep its clicks from opening the card.
+        <div onClick={(e) => e.stopPropagation()}>
+          <ConfirmDeleteModal
+            title={t("deleteModal.title")}
+            body={t("deleteModal.body", { name: ag.name })}
+            pending={del.isPending}
+            onClose={() => setConfirming(false)}
+            onConfirm={() => del.mutate(ag.id, { onSuccess: () => setConfirming(false) })}
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -3,24 +3,77 @@
     "crumbLab": "Skills Lab",
     "crumbConventions": "Conventions",
     "headingPrefix": "Conventions in ",
-    "repoFallback": "repo",
-    "subtitle": "Scan the cloned repo to surface house-rules — each backed by evidence you can turn into a Skill.",
-    "scanning": "Scanning…",
+    "subtitleNoScan": "Scan the cloned repo to surface house-rules — each backed by evidence you can turn into a Skill.",
+    "subtitle": "Detected from {files, plural, one {# sample file} other {# sample files}} · last scan {when}",
+    "scanStats": "{proposed} proposed · {dropped} dropped by the evidence check · {skipped} already triaged",
+    "runScan": "Run Scan",
     "rescan": "Re-scan",
-    "runExtraction": "Run extraction",
-    "extractionFailed": "Extraction failed",
+    "scanning": "Scanning…",
+    "scanHint": "The model reads config files and the top-ranked source files — this can take up to a minute.",
+    "scanFailed": "Scan failed",
     "loadError": "Could not load conventions.",
     "empty": {
       "title": "No conventions extracted yet",
-      "body": "Scan the repo to surface house-rules — naming, error handling, structure — each backed by evidence you can turn into a Skill.",
-      "cta": "Run extraction"
+      "body": "Run a scan to surface house-rules — naming, error handling, structure — each backed by evidence you can turn into a Skill."
     },
-    "candidateCount": "{count, plural, one {# candidate} other {# candidates}} · grounded against sampled files"
+    "noCandidates": {
+      "title": "No open candidates",
+      "body": "Everything the last scan proposed was already triaged or had no real evidence. Re-scan after the code changes."
+    },
+    "acceptedCount": "{accepted} of {total} accepted",
+    "acceptAll": "Accept all",
+    "createSkill": "Create skill"
   },
   "card": {
-    "confidence": "Confidence",
+    "accept": "Accept",
     "accepted": "Accepted",
-    "accepting": "Accepting…",
-    "acceptAsSkill": "Accept as Skill"
+    "reject": "Reject",
+    "edit": "Edit",
+    "save": "Save",
+    "cancel": "Cancel",
+    "confidence": "Confidence",
+    "ruleLabel": "Rule",
+    "categoryLabel": "Category",
+    "noEvidence": "No evidence recorded"
+  },
+  "category": {
+    "naming": "naming",
+    "structure": "structure",
+    "imports": "imports",
+    "types": "types",
+    "error-handling": "error handling",
+    "async": "async",
+    "testing": "testing",
+    "formatting": "formatting",
+    "api": "api",
+    "data-access": "data access",
+    "other": "other"
+  },
+  "modal": {
+    "title": "Create skill from conventions",
+    "banner": "Merged from {count, plural, one {# accepted convention} other {# accepted conventions}} in {repo}. Everything below is editable before you save.",
+    "existing": "A skill named “{name}” already exists — Create saves this as its next version.",
+    "draftLoading": "Merging accepted conventions…",
+    "draftError": "Could not build the skill draft.",
+    "fields": {
+      "name": "Name",
+      "description": "Description",
+      "type": "Type",
+      "enabled": "Enabled",
+      "enabledHint": "Whether this block is added to agents' prompts.",
+      "body": "Skill body",
+      "bodyHint": "{filename} · ~{count} tokens",
+      "agents": "Link to agents",
+      "agentsHint": "The skill is added to each selected agent's prompt, after the skills it already has."
+    },
+    "noAgents": "No agents yet — create one on the Agents page to link this skill.",
+    "disabledWithAgents": "Enable the skill to link it to agents.",
+    "footerNew": "Saved as v1 · added to Skills Lab",
+    "footerExisting": "Saved as a new version of the existing skill",
+    "cancel": "Cancel",
+    "create": "Create skill",
+    "creating": "Creating…",
+    "created": "Created “{name}” and linked it to {count, plural, =0 {no agents} one {# agent} other {# agents}}.",
+    "updated": "Saved “{name}” as v{version} and linked it to {count, plural, =0 {no agents} one {# agent} other {# agents}}."
   }
 }

@@ -30,6 +30,8 @@ import type {
   AuthUser,
   AuthWorkspace,
   SecretsProvider,
+  HttpFetcher,
+  HttpFetchResult,
   SecretKey,
 } from '@devdigest/shared';
 import { parseUnifiedDiff } from '../platform/diff-parser.js';
@@ -342,6 +344,25 @@ export class MockAuthProvider implements AuthProvider {
   }
   async currentWorkspace(): Promise<AuthWorkspace> {
     return this.workspace;
+  }
+}
+
+// ---------- Mock outbound HTTP ----------
+/** Canned responses by exact URL; anything else is a 404. Records every call. */
+export class MockHttpFetcher implements HttpFetcher {
+  public calls: string[] = [];
+  constructor(private responses: Record<string, Partial<HttpFetchResult> & { text?: string }> = {}) {}
+
+  async fetch(url: string): Promise<HttpFetchResult> {
+    this.calls.push(url);
+    const r = this.responses[url];
+    if (!r) return { url, status: 404, contentType: 'text/plain', body: new TextEncoder().encode('Not Found') };
+    return {
+      url: r.url ?? url,
+      status: r.status ?? 200,
+      contentType: r.contentType ?? 'text/plain; charset=utf-8',
+      body: r.body ?? new TextEncoder().encode(r.text ?? ''),
+    };
   }
 }
 

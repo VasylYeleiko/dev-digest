@@ -3,6 +3,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import { skillKeys } from "./skills";
 import type { Agent, AgentSkillLink, ModelInfo, Provider, ReviewStrategy } from "@devdigest/shared";
 
 // Query keys for this resource. `providerModels.all` is exported because
@@ -124,6 +125,9 @@ export function useSetAgentSkills() {
     },
     onSettled: (_data, _err, { agentId }) => {
       qc.invalidateQueries({ queryKey: agentKeys.skills(agentId) });
+      // Counters on both cards: an agent's "N skills" and a skill's "N agents".
+      qc.invalidateQueries({ queryKey: agentKeys.list() });
+      qc.invalidateQueries({ queryKey: skillKeys.list() });
     },
   });
 }

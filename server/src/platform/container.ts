@@ -9,6 +9,7 @@ import type {
   LLMProviderId,
   CodeParser,
   SourceFiles,
+  HttpFetcher,
   DepGraph,
   Tokenizer,
 } from '@devdigest/shared';
@@ -34,6 +35,7 @@ import { DepCruiseGraph } from '../adapters/depgraph/index.js';
 import { TiktokenTokenizer } from '../adapters/tokenizer/index.js';
 import { AstGrepCodeParser } from '../adapters/astgrep/index.js';
 import { LocalSourceFiles } from '../adapters/fs/local-source-files.js';
+import { NodeHttpFetcher } from '../adapters/http/node-http-fetcher.js';
 
 /**
  * DI container — the composition root for shared infrastructure (ring 4). One
@@ -63,6 +65,8 @@ export interface ContainerOverrides {
   tokenizer?: Tokenizer;
   codeParser?: CodeParser;
   sourceFiles?: SourceFiles;
+  /** Outbound HTTP for skill import-from-URL — tests inject a fake (no network). */
+  http?: HttpFetcher;
 }
 
 export class Container {
@@ -84,6 +88,7 @@ export class Container {
   private _tokenizer?: Tokenizer;
   private _codeParser?: CodeParser;
   private _sourceFiles?: SourceFiles;
+  private _http?: HttpFetcher;
   private _priceBook?: PriceBook;
 
   constructor(config: AppConfig, db: Db, private overrides: ContainerOverrides = {}) {
@@ -142,6 +147,13 @@ export class Container {
   }
 
   /** Read access to local clones on disk. repo-intel only. */
+  /** SSRF-guarded outbound GET for user-supplied URLs (skill import). */
+  get http(): HttpFetcher {
+    if (this.overrides.http) return this.overrides.http;
+    this._http ??= new NodeHttpFetcher();
+    return this._http;
+  }
+
   get sourceFiles(): SourceFiles {
     if (this.overrides.sourceFiles) return this.overrides.sourceFiles;
     this._sourceFiles ??= new LocalSourceFiles();

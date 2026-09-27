@@ -41,3 +41,12 @@ export interface LinkedSkill {
   skillId: string;
   order: number;
 }
+
+/** What attaching a skill needs to know about it: may it enter a prompt? */
+export interface SkillAttachState {
+  id: string;
+  enabled: boolean;
+  /** Name + body: both go into the prompt, so both are vetted. */
+  name: string;
+  body: string;
+}

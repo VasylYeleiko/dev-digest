@@ -1,15 +1,17 @@
-/* SkillCard — name, type + source badges, description, enabled toggle. Shared
+/* SkillCard — name, type + source badges, version, how many agents use it,
+   description, enabled toggle and Delete (with a confirmation modal). Shared
    between the Skills list grid and the Skill Editor's left sidebar list
    (mirrors AgentCard's dual use in AgentsListView / AgentEditorPage). */
 "use client";
 
 import React from "react";
 import { useTranslations } from "next-intl";
-import { Icon, Badge } from "@devdigest/ui";
-import { Toggle } from "@devdigest/ui";
+import { Icon, Badge, Toggle } from "@devdigest/ui";
 import type { Skill } from "@devdigest/shared";
 import { useDeleteSkill } from "../../../../lib/hooks/skills";
 import { SkillTypeChip } from "../../../../components/SkillTypeChip";
+import { InjectionBadge } from "../../../../components/InjectionBadge";
+import { ConfirmDeleteModal } from "../../../../components/ConfirmDeleteModal";
 import { sourceIcon } from "./helpers";
 import { s } from "./styles";
 
@@ -26,6 +28,10 @@ export function SkillCard({
 }) {
   const t = useTranslations("skills");
   const del = useDeleteSkill();
+  const [confirming, setConfirming] = React.useState(false);
+  const blocked = sk.injection?.detected ?? false;
+  const agentCount = sk.agent_count ?? 0;
+
   return (
     <div onClick={onClick} style={s.card(!!active, sk.enabled)}>
       <div style={s.headerRow}>
@@ -34,26 +40,24 @@ export function SkillCard({
         </div>
         <span style={s.name}>{sk.name}</span>
         {onToggle && (
-          <div onClick={(e) => e.stopPropagation()}>
-            <Toggle on={sk.enabled} onChange={onToggle} size={14} />
+          <div
+            onClick={(e) => e.stopPropagation()}
+            title={blocked ? t("injection.toggleBlocked") : undefined}
+            style={blocked ? s.blockedToggle : undefined}
+          >
+            {/* Enabling a flagged skill is refused server-side — make the switch inert. */}
+            <Toggle on={sk.enabled} onChange={blocked ? () => {} : onToggle} size={14} />
           </div>
         )}
         <button
           onClick={(e) => {
             e.stopPropagation();
-            if (window.confirm(`Delete skill "${sk.name}"? This cannot be undone.`)) del.mutate(sk.id);
+            setConfirming(true);
           }}
           disabled={del.isPending}
           title="Delete skill"
           aria-label="Delete skill"
-          style={{
-            background: "none",
-            border: "none",
-            cursor: del.isPending ? "not-allowed" : "pointer",
-            color: "var(--text-muted)",
-            display: "inline-flex",
-            padding: 4,
-          }}
+          style={s.deleteButton(del.isPending)}
         >
           <Icon.Trash size={14} style={del.isPending ? { animation: "ddspin 1s linear infinite" } : undefined} />
         </button>
@@ -61,10 +65,29 @@ export function SkillCard({
       <div style={s.description}>{sk.description}</div>
       <div style={s.metaRow}>
         <SkillTypeChip type={sk.type} />
+        {blocked && <InjectionBadge />}
         <Badge color="var(--text-secondary)" icon={sourceIcon(sk.source)}>
           {t(`listItem.source.${sk.source}`)}
         </Badge>
+        <Badge color="var(--text-secondary)" mono>
+          {t("listItem.version", { version: sk.version })}
+        </Badge>
+        <Badge color="var(--text-secondary)" icon="Cpu">
+          {t("listItem.agentCount", { count: agentCount })}
+        </Badge>
       </div>
+      {confirming && (
+        // The modal renders inside the card: keep its clicks from opening the card.
+        <div onClick={(e) => e.stopPropagation()}>
+          <ConfirmDeleteModal
+            title={t("deleteModal.title")}
+            body={t("deleteModal.body", { name: sk.name, count: agentCount })}
+            pending={del.isPending}
+            onClose={() => setConfirming(false)}
+            onConfirm={() => del.mutate(sk.id, { onSuccess: () => setConfirming(false) })}
+          />
+        </div>
+      )}
     </div>
   );
 }

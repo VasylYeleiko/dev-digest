@@ -27,9 +27,14 @@ export function filterSkillsByName(skills: Skill[], search: string): Skill[] {
   return skills.filter((s) => s.name.toLowerCase().includes(q));
 }
 
-/** A skill can be freshly attached only when it's enabled — a disabled skill
- *  that's already linked stays visible (greyed) so it can still be detached
- *  or reordered, but its checkbox can't be (re)checked. */
+/** A skill can be freshly attached only when it's enabled AND its body has no
+ *  prompt-injection patterns (the server refuses both) — a disabled or flagged
+ *  skill that's already linked stays visible so it can still be detached or
+ *  reordered, but its checkbox can't be (re)checked. */
 export function canAttach(sk: Skill): boolean {
-  return sk.enabled;
+  return sk.enabled && !isInjectionFlagged(sk);
+}
+
+export function isInjectionFlagged(sk: Skill): boolean {
+  return sk.injection?.detected ?? false;
 }

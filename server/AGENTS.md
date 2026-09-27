@@ -79,8 +79,15 @@ already exists; unused ones sit empty until a lesson fills them). `repo-intel` h
   re-indexed, not just re-reviewed.
 - `INJECTION_GUARD` (assembled in `reviewer-core/prompt.ts`, fed inputs from
   `modules/reviews/run-executor.ts`) is the **only** prompt-injection
-  defense — there is deliberately no keyword denylist. Don't add one; it only
-  catches one phrasing and gives false confidence.
+  defense for **PR inputs** (diff, title/body, README, spec) — they are fenced
+  as untrusted data, and there is deliberately no keyword denylist on them.
+  Don't add one; it only catches one phrasing and gives false confidence.
+  **Skill bodies are the one exception:** they enter the system prompt as
+  *trusted* instructions, where the guard can't help, so
+  `platform/prompt-injection.ts` vets them — a flagged skill stays disabled,
+  can't be attached to an agent, and is skipped at prompt assembly. It is a
+  vetting gate for authored/imported skills, not a guarantee: a clean report
+  never means "safe", and it must not be reused on PR inputs.
 - Grounding is mandatory: every finding must cite a real diff line
   (`groundFindings`) and the score is recomputed from survivors — the
   model's self-reported score is never trusted.

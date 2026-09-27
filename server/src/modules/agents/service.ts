@@ -11,6 +11,7 @@ import type {
 import type { AgentStore } from './ports.js';
 import { toAgentDto, toAgentVersionDto } from './helpers.js';
 import { ValidationError } from '../../platform/errors.js';
+import { scanSkill } from '../../platform/prompt-injection.js';
 
 /**
  * A2 — agents service (ring 2). Business logic for the Agents tab + Agent Editor.
@@ -34,7 +35,8 @@ export class AgentsService {
 
   async list(workspaceId: string): Promise<Agent[]> {
     const rows = await this.deps.agents.list(workspaceId);
-    return rows.map(toAgentDto);
+    const counts = await this.deps.agents.skillCounts(workspaceId, rows.map((r) => r.id));
+    return rows.map((r) => toAgentDto(r, counts.get(r.id) ?? 0));
   }
 
   async get(workspaceId: string, id: string): Promise<Agent | undefined> {
@@ -113,7 +115,15 @@ export class AgentsService {
   }
 
   /** Linked skills for an agent as AgentSkillLink[] (ordered). */
-  async skillLinks(agentId: string): Promise<AgentSkillLink[]> {
+  /** The agent's ordered skill links, or undefined when it isn't in this workspace. */
+  async skillLinks(workspaceId: string, agentId: string): Promise<AgentSkillLink[] | undefined> {
+    const agent = await this.deps.agents.getById(workspaceId, agentId);
+    if (!agent) return undefined;
+    return this.linksOf(agentId);
+  }
+
+  /** Links of an agent whose workspace the caller has already checked. */
+  private async linksOf(agentId: string): Promise<AgentSkillLink[]> {
     const links = await this.deps.agents.linkedSkills(agentId);
     return links.map((l) => ({ agent_id: agentId, skill_id: l.skillId, order: l.order }));
   }
@@ -136,9 +146,9 @@ export class AgentsService {
     const existing = await this.deps.agents.linkedSkills(agentId);
     const existingIds = new Set(existing.map((l) => l.skillId));
     const newlyAttached = skillIds.filter((id) => !existingIds.has(id));
-    await this.rejectDisabled(newlyAttached);
+    await this.rejectUnattachable(workspaceId, newlyAttached);
     await this.deps.agents.setSkills(agentId, skillIds);
-    return this.skillLinks(agentId);
+    return this.linksOf(agentId);
   }
 
   /** Link a single skill (append or set order) — additive to existing links.
@@ -153,16 +163,32 @@ export class AgentsService {
     if (!agent) return undefined;
     const existing = await this.deps.agents.linkedSkills(agentId);
     const alreadyLinked = existing.some((l) => l.skillId === skillId);
-    if (!alreadyLinked) await this.rejectDisabled([skillId]);
+    if (!alreadyLinked) await this.rejectUnattachable(workspaceId, [skillId]);
     const resolvedOrder = order ?? existing.length;
     await this.deps.agents.linkSkill(agentId, skillId, resolvedOrder);
-    return this.skillLinks(agentId);
+    return this.linksOf(agentId);
   }
 
-  /** Throws when any of `skillIds` is disabled. */
-  private async rejectDisabled(skillIds: string[]): Promise<void> {
+  /**
+   * Throws when any of `skillIds` is not a skill of this workspace, carries
+   * prompt-injection patterns (it would go into this agent's system prompt as
+   * trusted instructions) or is disabled.
+   */
+  private async rejectUnattachable(workspaceId: string, skillIds: string[]): Promise<void> {
     if (skillIds.length === 0) return;
-    const disabled = await this.deps.agents.disabledSkillIds(skillIds);
+    const skills = await this.deps.agents.skillAttachState(workspaceId, skillIds);
+    const found = new Set(skills.map((s) => s.id));
+    const unknown = skillIds.filter((id) => !found.has(id));
+    if (unknown.length > 0) {
+      throw new ValidationError('Unknown skill', { skill_ids: unknown });
+    }
+    const flagged = skills.filter((s) => scanSkill(s.name, s.body).detected).map((s) => s.id);
+    if (flagged.length > 0) {
+      throw new ValidationError('Cannot attach a skill that contains prompt-injection patterns', {
+        skill_ids: flagged,
+      });
+    }
+    const disabled = skills.filter((s) => !s.enabled).map((s) => s.id);
     if (disabled.length > 0) {
       throw new ValidationError('Cannot attach a disabled skill', { skill_ids: disabled });
     }

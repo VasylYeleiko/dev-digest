@@ -118,6 +118,27 @@ export type SkillType = z.infer<typeof SkillType>;
 export const SkillSource = z.enum(['manual', 'imported_url', 'extracted', 'community']);
 export type SkillSource = z.infer<typeof SkillSource>;
 
+/**
+ * Prompt-injection vetting of a skill body (server-computed on every read from
+ * the CURRENT body, so it clears as soon as the body is fixed). A flagged skill
+ * stays disabled, can't be attached to an agent, and is skipped in prompts.
+ */
+/** `InjectionFinding.line` of a match in the skill's NAME (body lines are 1-based). */
+export const INJECTION_NAME_LINE = 0;
+
+export const InjectionFinding = z.object({
+  rule: z.string(),
+  line: z.number().int(),
+  excerpt: z.string(),
+});
+export type InjectionFinding = z.infer<typeof InjectionFinding>;
+
+export const InjectionReport = z.object({
+  detected: z.boolean(),
+  findings: z.array(InjectionFinding),
+});
+export type InjectionReport = z.infer<typeof InjectionReport>;
+
 export const Skill = z.object({
   id: z.string(),
   name: z.string(),
@@ -128,6 +149,10 @@ export const Skill = z.object({
   enabled: z.boolean(),
   version: z.number().int(),
   evidence_files: z.array(z.string()).nullish(),
+  /** Always set by the API; optional so hand-built fixtures/bundles stay valid. */
+  injection: InjectionReport.optional(),
+  /** Agents in this workspace linking the skill (list/get/create/update). */
+  agent_count: z.number().int().optional(),
 });
 export type Skill = z.infer<typeof Skill>;
 
@@ -170,8 +195,15 @@ export const SkillImportPreview = z.object({
   type: SkillType,
   body: z.string(),
   source: SkillSource,
+  injection: InjectionReport.optional(),
 });
 export type SkillImportPreview = z.infer<typeof SkillImportPreview>;
+
+/** POST /skills/import-url body — fetched server-side (SSRF-guarded); nothing persists. */
+export const ImportSkillUrlRequest = z.object({
+  url: z.string().trim().url().max(2048),
+});
+export type ImportSkillUrlRequest = z.infer<typeof ImportSkillUrlRequest>;
 
 export const SkillStats = z.object({
   used_by: z.number().int(),
@@ -231,6 +263,8 @@ export const Agent = z.object({
   // Inject repo-intel context (repo skeleton + callers + rank note) into this
   // agent's review prompt. Default on; gated again by the global flag.
   repo_intel: z.boolean().default(true),
+  /** Linked skills (set by GET /agents for the card counter). */
+  skill_count: z.number().int().optional(),
 });
 export type Agent = z.infer<typeof Agent>;
 

@@ -20,9 +20,9 @@
  * Returns plain data so the repo-intel pipeline (full.ts / incremental.ts),
  * which only sees the `SourceFiles` port, decides what to do with it.
  */
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
-import { extname, join, relative, sep } from 'node:path';
+import { extname, isAbsolute, join, relative, sep } from 'node:path';
 import type { SourceFiles, WalkResult, WalkStats } from '@devdigest/shared';
 import {
   EXCLUDED_DIRS,
@@ -35,13 +35,32 @@ const EXCLUDED_SET: ReadonlySet<string> = new Set(EXCLUDED_DIRS);
 const SUPPORTED_SET: ReadonlySet<string> = new Set(SUPPORTED_EXT);
 
 export class LocalSourceFiles implements SourceFiles {
+  /**
+   * Confined to the clone: the path is resolved through any symlinks and read
+   * only if it still lands inside `root`. A cloned repo controls its own
+   * symlinks (`tsconfig.json -> ~/.devdigest/secrets.json`) and `relPath` can
+   * come from a diff, so neither may reach a host file — whatever is read here
+   * can end up in an LLM prompt.
+   */
   async read(root: string, relPath: string): Promise<string | null> {
-    return readFile(join(root, relPath), 'utf8').catch(() => null);
+    try {
+      const [base, target] = await Promise.all([realpath(root), realpath(join(root, relPath))]);
+      if (!isInside(base, target)) return null;
+      return await readFile(target, 'utf8');
+    } catch {
+      return null;
+    }
   }
 
   walk(root: string): Promise<WalkResult> {
     return walkClone(root);
   }
+}
+
+/** True when `target` is a path strictly below `base` (both already real paths). */
+function isInside(base: string, target: string): boolean {
+  const rel = relative(base, target);
+  return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
 /**

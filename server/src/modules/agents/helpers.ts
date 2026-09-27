@@ -8,7 +8,8 @@ import type { AgentEntity, AgentVersionEntity } from './types.js';
  */
 
 /** Map an agent entity to the public `Agent` DTO. */
-export function toAgentDto(row: AgentEntity): Agent {
+/** `skillCount` (linked skills) is included when the caller looked it up. */
+export function toAgentDto(row: AgentEntity, skillCount?: number): Agent {
   return {
     id: row.id,
     name: row.name,
@@ -22,6 +23,7 @@ export function toAgentDto(row: AgentEntity): Agent {
     strategy: row.strategy as ReviewStrategy,
     ci_fail_on: row.ciFailOn as CiFailOn,
     repo_intel: row.repoIntel,
+    ...(skillCount !== undefined ? { skill_count: skillCount } : {}),
   };
 }
 
