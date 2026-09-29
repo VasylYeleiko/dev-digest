@@ -8,9 +8,12 @@ import { Toggle, EmptyState } from "@devdigest/ui";
 import type { FindingRecord } from "@devdigest/shared";
 import { FindingCard } from "../FindingCard";
 import { useFindingAction } from "../../../../../../../lib/hooks/reviews";
-import { KEY_TO_ACTION, type FindingSeverity } from "./constants";
-import { visibleFindings, countBySeverity } from "./helpers";
+import { KEY_TO_ACTION } from "./constants";
+import { visibleFindings } from "./helpers";
+import { countBySeverity, type FindingSeverity } from "../../severity";
 import { SeverityBar } from "./SeverityBar";
+import { useShortcutOwner } from "./activePanel";
+import { isTextInput } from "../../../../../../../components/app-shell/helpers";
 import { s } from "./styles";
 
 export function FindingsPanel({
@@ -41,11 +44,15 @@ export function FindingsPanel({
 
   const onToggleSeverity = (sev: FindingSeverity) => setSevFilter((prev) => (prev === sev ? null : sev));
 
-  // j/k navigation + a/d shortcuts on the focused finding (keyboard).
+  // j/k navigation + a/d shortcuts on the focused finding (keyboard). Only the
+  // panel that owns the shortcuts reacts — see activePanel.ts.
+  const { active, claim } = useShortcutOwner();
   React.useEffect(() => {
+    if (!active) return;
     const handler = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (isTextInput(e.target)) return;
+      // Leave Ctrl/Cmd/Alt combos (e.g. Ctrl+K palette, Cmd+D bookmark) alone.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === "j") setFocusIdx(Math.min(focus + 1, shown.length - 1));
       else if (e.key === "k") setFocusIdx(Math.max(focus - 1, 0));
       else if (KEY_TO_ACTION[e.key] && shown[focus]) {
@@ -54,10 +61,10 @@ export function FindingsPanel({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [shown, focus, action, prId]);
+  }, [active, shown, focus, action, prId]);
 
   return (
-    <div>
+    <div onPointerDownCapture={claim} onFocusCapture={claim}>
       <SeverityBar counts={counts} active={sevFilter} onToggle={onToggleSeverity} />
       <div style={s.toolbar}>
         <div style={s.toggleGroup}>
@@ -74,7 +81,7 @@ export function FindingsPanel({
             <FindingCard
               key={f.id}
               f={f}
-              focused={i === focus}
+              focused={active && i === focus}
               defaultExpanded={i === 0}
               pending={action.isPending}
               repoFullName={repoFullName}

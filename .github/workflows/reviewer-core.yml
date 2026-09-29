@@ -12,11 +12,15 @@ on:
     paths:
       - 'reviewer-core/**'
       - 'server/src/vendor/shared/**'
+      - 'server/src/adapters/mocks.ts' # imported by test/run.test.ts
+      - 'server/src/platform/diff-parser.ts' # imported by mocks.ts
       - '.github/workflows/reviewer-core.yml'
   pull_request:
     paths:
       - 'reviewer-core/**'
       - 'server/src/vendor/shared/**'
+      - 'server/src/adapters/mocks.ts' # imported by test/run.test.ts
+      - 'server/src/platform/diff-parser.ts' # imported by mocks.ts
       - '.github/workflows/reviewer-core.yml'
 
 permissions:

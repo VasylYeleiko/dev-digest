@@ -1,6 +1,6 @@
 # server/docs
 
-Deep-dive notes that don't belong in [`../CLAUDE.md`](../CLAUDE.md) (the
+Deep-dive notes that don't belong in [`../AGENTS.md`](../AGENTS.md) (the
 map) or [`../README.md`](../README.md) (the architecture overview) —
 design rationale, non-obvious pipeline internals, decisions worth more than
 a bullet.

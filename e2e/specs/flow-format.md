@@ -48,7 +48,7 @@ interface Step {
 
 ## Do not touch
 
-Per `e2e/CLAUDE.md`: don't hand-edit a `.flow.json` file into a shape this
+Per `e2e/AGENTS.md`: don't hand-edit a `.flow.json` file into a shape this
 spec doesn't describe (e.g. adding a `chat` step, or a template token besides
 `{BASE}`) — author new flows as command lists following this contract, using
 an existing spec as the starting template.

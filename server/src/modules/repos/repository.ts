@@ -1,27 +1,19 @@
 import { and, eq } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
+import type { InsertRepo, RepoStore } from './ports.js';
+import type { RepoEntity } from './types.js';
 
 /**
- * F1 — repos data-access layer. The ONLY place that touches the `repos`
- * table. Every query is scoped by `workspaceId` (tenancy guard).
+ * F1 — repos data-access layer (ring 3). The ONLY place that touches the
+ * `repos` table; implements the `RepoStore` port. Every query is scoped by
+ * `workspaceId` (tenancy guard) except `workspaceIdFor`, whose contract says so.
+ * The Drizzle row has exactly the `RepoEntity` shape, so rows are returned as-is.
  */
-
-export type RepoRow = typeof t.repos.$inferSelect;
-
-export interface InsertRepo {
-  workspaceId: string;
-  owner: string;
-  name: string;
-  fullName: string;
-  createdBy: string;
-}
-
-export class RepoRepository {
+export class RepoRepository implements RepoStore {
   constructor(private db: Db) {}
 
-  /** Find a repo in a workspace by its `owner/name` full name (dedupe on add). */
-  async findByFullName(workspaceId: string, fullName: string): Promise<RepoRow | undefined> {
+  async findByFullName(workspaceId: string, fullName: string): Promise<RepoEntity | undefined> {
     const [row] = await this.db
       .select()
       .from(t.repos)
@@ -29,11 +21,11 @@ export class RepoRepository {
     return row;
   }
 
-  async list(workspaceId: string): Promise<RepoRow[]> {
+  async list(workspaceId: string): Promise<RepoEntity[]> {
     return this.db.select().from(t.repos).where(eq(t.repos.workspaceId, workspaceId));
   }
 
-  async getById(workspaceId: string, id: string): Promise<RepoRow | undefined> {
+  async getById(workspaceId: string, id: string): Promise<RepoEntity | undefined> {
     const [row] = await this.db
       .select()
       .from(t.repos)
@@ -41,7 +33,7 @@ export class RepoRepository {
     return row;
   }
 
-  async insert(values: InsertRepo): Promise<RepoRow> {
+  async insert(values: InsertRepo): Promise<RepoEntity> {
     const [row] = await this.db
       .insert(t.repos)
       .values({
@@ -55,12 +47,6 @@ export class RepoRepository {
     return row!;
   }
 
-  /**
-   * Look up the workspace owning a repo (by repo id, no tenancy scope —
-   * the JobRunner's `runCloneJob` is the only caller and it already trusted
-   * the payload that came out of an authenticated `add()`). Returns null
-   * if the repo was deleted before the followup ran.
-   */
   async workspaceIdFor(repoId: string): Promise<string | null> {
     const [row] = await this.db
       .select({ workspaceId: t.repos.workspaceId })
@@ -69,12 +55,15 @@ export class RepoRepository {
     return row?.workspaceId ?? null;
   }
 
-  /** Persist the clone path and bump `last_polled_at` once a clone job completes. */
   async updateClonePath(repoId: string, clonePath: string): Promise<void> {
     await this.db
       .update(t.repos)
       .set({ clonePath, lastPolledAt: new Date() })
       .where(eq(t.repos.id, repoId));
+  }
+
+  async markPolled(repoId: string): Promise<void> {
+    await this.db.update(t.repos).set({ lastPolledAt: new Date() }).where(eq(t.repos.id, repoId));
   }
 
   async remove(workspaceId: string, id: string): Promise<boolean> {

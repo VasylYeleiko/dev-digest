@@ -1,15 +1,11 @@
 import { type Repo } from '@devdigest/shared';
-import * as t from '../../db/schema.js';
 import { AppError } from '../../platform/errors.js';
-import {
-  GITHUB_URL_REGEX,
-  GIT_TOKEN_USERNAME,
-  GITHUB_HTTPS_HOST,
-} from './constants.js';
+import type { RepoEntity } from './types.js';
+import { GITHUB_URL_REGEX } from './constants.js';
 
 /**
- * F1 — repos pure helpers (extracted from routes.ts; no behaviour change).
- * Pure functions only — no I/O, no DB, no container.
+ * F1 — repos pure helpers (ring 1). Pure functions only — no I/O, no DB, no
+ * container.
  */
 
 /** Parse `owner`/`name` from a GitHub URL (https or ssh form). */
@@ -22,35 +18,17 @@ export function parseRepoUrl(url: string): { owner: string; name: string } {
   return { owner: match[1], name: match[2] };
 }
 
-/**
- * Embed a token into an https github.com URL so private clones authenticate
- * non-interactively. SSH/non-GitHub URLs are left untouched.
- */
-export function withGitHubToken(url: string, token: string): string {
-  try {
-    const u = new URL(url);
-    if (u.protocol === 'https:' && u.hostname === GITHUB_HTTPS_HOST) {
-      u.username = GIT_TOKEN_USERNAME;
-      u.password = token;
-      return u.toString();
-    }
-  } catch {
-    /* non-URL (e.g. git@github.com:...) — leave as-is */
-  }
-  return url;
-}
-
-/** Map a persisted repo row to the API `Repo` DTO. */
-export function toRepoDto(row: typeof t.repos.$inferSelect): Repo {
+/** Map a repo entity to the API `Repo` DTO. */
+export function toRepoDto(repo: RepoEntity): Repo {
   return {
-    id: row.id,
-    workspace_id: row.workspaceId,
-    owner: row.owner,
-    name: row.name,
-    full_name: row.fullName,
-    default_branch: row.defaultBranch,
-    clone_path: row.clonePath,
-    last_polled_at: row.lastPolledAt?.toISOString() ?? null,
-    created_by: row.createdBy,
+    id: repo.id,
+    workspace_id: repo.workspaceId,
+    owner: repo.owner,
+    name: repo.name,
+    full_name: repo.fullName,
+    default_branch: repo.defaultBranch,
+    clone_path: repo.clonePath,
+    last_polled_at: repo.lastPolledAt?.toISOString() ?? null,
+    created_by: repo.createdBy,
   };
 }

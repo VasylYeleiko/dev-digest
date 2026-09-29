@@ -1,7 +1,8 @@
 import { and, desc, eq } from 'drizzle-orm';
-import type { Db } from '../../../db/client.js';
+import type { Db, DbExecutor } from '../../../db/client.js';
 import * as t from '../../../db/schema.js';
 import type { RunSummary, RunTrace } from '@devdigest/shared';
+import type { ActiveRun, AgentRunCompletion, NewAgentRun } from '../types.js';
 
 // ---- in-flight / history --------------------------------------------------
 
@@ -11,7 +12,7 @@ export async function activeRunsForPull(
   db: Db,
   workspaceId: string,
   prId: string,
-): Promise<{ run_id: string; agent_id: string | null; agent_name: string | null; ran_at: string | null }[]> {
+): Promise<ActiveRun[]> {
   const rows = await db
     .select({
       id: t.agentRuns.id,
@@ -80,14 +81,30 @@ export async function deleteAgentRun(
   workspaceId: string,
   runId: string,
 ): Promise<boolean> {
-  await db
-    .delete(t.reviews)
-    .where(and(eq(t.reviews.runId, runId), eq(t.reviews.workspaceId, workspaceId)));
-  const rows = await db
-    .delete(t.agentRuns)
-    .where(and(eq(t.agentRuns.id, runId), eq(t.agentRuns.workspaceId, workspaceId)))
-    .returning({ id: t.agentRuns.id });
-  return rows.length > 0;
+  // Both deletes or neither: never a run without its reviews, or the reverse.
+  return db.transaction(async (tx) => {
+    await tx
+      .delete(t.reviews)
+      .where(and(eq(t.reviews.runId, runId), eq(t.reviews.workspaceId, workspaceId)));
+    const rows = await tx
+      .delete(t.agentRuns)
+      .where(and(eq(t.agentRuns.id, runId), eq(t.agentRuns.workspaceId, workspaceId)))
+      .returning({ id: t.agentRuns.id });
+    return rows.length > 0;
+  });
+}
+
+/** A run's status; undefined when the run does not exist in the workspace. */
+export async function runStatus(
+  db: Db,
+  workspaceId: string,
+  runId: string,
+): Promise<string | null | undefined> {
+  const [row] = await db
+    .select({ status: t.agentRuns.status })
+    .from(t.agentRuns)
+    .where(and(eq(t.agentRuns.id, runId), eq(t.agentRuns.workspaceId, workspaceId)));
+  return row ? row.status : undefined;
 }
 
 /** Mark a still-running run as cancelled (no-op if it already finished). */
@@ -116,13 +133,7 @@ export async function reapStaleRunningRuns(db: Db): Promise<number> {
 /** Create an agent_runs row in `running` state; returns its id (= the runId). */
 export async function createAgentRun(
   db: Db,
-  values: {
-    workspaceId: string;
-    agentId: string | null;
-    prId: string;
-    provider: string | null;
-    model: string | null;
-  },
+  values: NewAgentRun,
 ): Promise<string> {
   const [row] = await db
     .insert(t.agentRuns)
@@ -140,24 +151,9 @@ export async function createAgentRun(
 }
 
 export async function completeAgentRun(
-  db: Db,
+  db: DbExecutor,
   runId: string,
-  values: {
-    status: 'done' | 'failed' | 'cancelled';
-    durationMs: number;
-    tokensIn: number;
-    tokensOut: number;
-    /** Generation cost in USD; null when un-priced or on failed/cancelled runs. */
-    costUsd: number | null;
-    findingsCount: number;
-    grounding: string;
-    /** Review score (0-100); null on failed/cancelled runs. */
-    score?: number | null;
-    /** Findings that tripped the agent's gate; 0 on failed/cancelled runs. */
-    blockers?: number | null;
-    /** Failure reason (status='failed') / cancellation note. Null clears it. */
-    error?: string | null;
-  },
+  values: AgentRunCompletion,
 ): Promise<void> {
   await db
     .update(t.agentRuns)

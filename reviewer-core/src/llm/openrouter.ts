@@ -24,6 +24,9 @@ import { toJsonSchema, parseWithRepair } from './structured.js';
 
 const NOT_SUPPORTED = 'OpenRouterProvider only implements completeStructured';
 
+/** Upper bound for the raw `/models` fetch (a list call; seconds, not minutes). */
+const LIST_MODELS_TIMEOUT_MS = 20_000;
+
 export interface OpenRouterProviderOptions {
   /** OpenAI-compatible base URL (default: OpenRouter). */
   baseURL?: string;
@@ -123,6 +126,9 @@ export class OpenRouterProvider implements LLMProvider {
   async listModels(): Promise<ModelInfo[]> {
     const res = await fetch(`${this.baseURL}/models`, {
       headers: { Authorization: `Bearer ${this.apiKey}` },
+      // Raw fetch has no default timeout (unlike the SDK client above) — a hung
+      // endpoint would otherwise stall Settings → "test connection" forever.
+      signal: AbortSignal.timeout(LIST_MODELS_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`OpenRouter /models returned ${res.status}`);
     const json = (await res.json()) as {

@@ -1,0 +1,8 @@
+{
+  // Type-check the tests too. The base tsconfig.json covers src/ only (it also
+  // drives the build); vitest strips types, so without this a test that no
+  // longer matches the code it exercises still "passes".
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "noEmit": true },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Finding, Review, UnifiedDiff } from '@devdigest/shared';
 import { toReviewPayload, gateTriggered, countBlockers } from '../src/index.js';
+import { neutralizeMarkdown } from '../src/output/to-review.js';
 
 /**
  * The review EVENT is computed deterministically from finding severities + the
@@ -162,5 +163,27 @@ describe('gateTriggered', () => {
     expect(gateTriggered([finding('WARNING')], 'warning')).toBe(true);
     expect(gateTriggered([finding('CRITICAL')], 'never')).toBe(false);
     expect(gateTriggered([], 'any')).toBe(false);
+  });
+});
+
+describe('neutralizeMarkdown — untrusted model text in a public review', () => {
+  it('breaks @mentions and escapes raw HTML outside code', () => {
+    const out = neutralizeMarkdown('ping @octocat and @org/team <img src=x>');
+    expect(out).not.toMatch(/@octocat|@org/);
+    expect(out).toContain('@\u200boctocat');
+    expect(out).toContain('&lt;img src=x>');
+  });
+
+  it('leaves emails, code spans and fences untouched', () => {
+    const text = 'mail a@b.com, use `Array<string>` or\n```ts\n@Injectable()\nclass A<T> {}\n```';
+    expect(neutralizeMarkdown(text)).toBe(text);
+  });
+
+  it('is applied to the review body and inline comments', () => {
+    const f = { ...finding('WARNING'), title: 'cc @admin', rationale: '<b>x</b>' } as Finding;
+    const p = toReviewPayload(review([f]));
+    expect(p.body).not.toContain('@admin');
+    expect(p.body).toContain('&lt;b>');
+    expect(p.comments?.[0]?.body).not.toContain('@admin');
   });
 });

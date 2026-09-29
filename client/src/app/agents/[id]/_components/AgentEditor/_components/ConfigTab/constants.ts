@@ -1,7 +1,7 @@
-import type { CiFailOn, Provider, ReviewStrategy } from "@devdigest/shared";
+import { Provider, type CiFailOn, type ReviewStrategy } from "@devdigest/shared";
 
-/** Selectable providers in the Config tab. */
-export const PROVIDER_OPTIONS: readonly Provider[] = ["openai", "anthropic", "openrouter"];
+/** Selectable providers in the Config tab — straight from the contract enum. */
+export const PROVIDER_OPTIONS: readonly Provider[] = Provider.options;
 
 /** Selectable review strategies (labels are i18n'd in the component). */
 export const STRATEGY_VALUES: readonly ReviewStrategy[] = ["single-pass", "map-reduce", "auto"];

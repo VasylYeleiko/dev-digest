@@ -1,0 +1,26 @@
+diff --git a/server/src/modules/skills/routes.ts b/server/src/modules/skills/routes.ts
+index da5abfe..330a457 100644
+--- a/server/src/modules/skills/routes.ts
++++ b/server/src/modules/skills/routes.ts
+@@ -80,7 +80,7 @@ export default async function skillsRoutes(appBase: FastifyInstance) {
+     return { ok: true };
+   });
+ 
+-  app.get('/skills/:id/versions', { schema: { params: IdParams } }, async (req) => {
++  app.get('/skills/:id/history', { schema: { params: IdParams } }, async (req) => {
+     const { workspaceId } = await ctx(req);
+     const versions = await service.listVersions(workspaceId, req.params.id);
+     if (!versions) throw new NotFoundError('Skill not found');
+diff --git a/server/src/modules/skills/helpers.ts b/server/src/modules/skills/helpers.ts
+index df944c5..2654db3 100644
+--- a/server/src/modules/skills/helpers.ts
++++ b/server/src/modules/skills/helpers.ts
+@@ -38,7 +38,7 @@ export function toSkillVersionDto(row: SkillVersionEntity): SkillVersion {
+     skill_id: row.skillId,
+     version: row.version,
+     body: row.body,
+-    created_at: row.createdAt.toISOString(),
++    saved_at: row.createdAt.toISOString(),
+   };
+ }
+ 

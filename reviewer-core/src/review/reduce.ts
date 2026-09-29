@@ -60,8 +60,11 @@ export function sliceDiff(diff: UnifiedDiff, path: string): string {
   const out: string[] = [];
   let capture = false;
   for (const line of lines) {
+    // Match the header's new-side path exactly (it ends the line): a substring
+    // test let `foo.ts` also capture `foo.tsx` / `src/foo.ts.bak`, so one map
+    // chunk reviewed another file's diff too. ` ${path}` covers --no-prefix diffs.
     if (line.startsWith('diff --git'))
-      capture = line.includes(`b/${path}`) || line.includes(` ${path}`);
+      capture = line.endsWith(` b/${path}`) || line.endsWith(` ${path}`);
     if (capture) out.push(line);
   }
   if (out.length > 0) return out.join('\n');

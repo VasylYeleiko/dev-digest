@@ -1,9 +1,10 @@
 /**
- * Pure helpers for the review service (side-effect free; operate purely on
- * their arguments — no DB / network / `this`).
+ * Pure helpers for the review service (ring 1 — side-effect free; operate
+ * purely on their arguments — no DB / network / `this`).
  */
 import type { Finding } from '@devdigest/shared';
-import type { FindingRow, PullRow, ReviewRow } from './repository.js';
+import type { PullEntity } from '../pulls/index.js';
+import type { FindingEntity, ReviewEntity } from './types.js';
 
 // reduceReviews + sliceDiff live in @devdigest/reviewer-core (pure engine logic
 // shared with the CI runner); re-exported here for backward-compatible imports.
@@ -31,7 +32,7 @@ export interface ReviewDto {
   findings: ReviewDtoFinding[];
 }
 
-export function findingRowToDto(row: FindingRow): ReviewDtoFinding {
+export function findingRowToDto(row: FindingEntity): ReviewDtoFinding {
   return {
     id: row.id,
     severity: row.severity as Finding['severity'],
@@ -53,8 +54,8 @@ export function findingRowToDto(row: FindingRow): ReviewDtoFinding {
 }
 
 export function reviewToDto(
-  review: ReviewRow,
-  findings: FindingRow[],
+  review: ReviewEntity,
+  findings: FindingEntity[],
   agentName?: string | null,
 ): ReviewDto {
   return {
@@ -79,7 +80,7 @@ export function reviewToDto(
  * The TRUSTED part (ours) states the task and the non-negotiable rule: review
  * the whole diff and never withhold a security/correctness finding.
  */
-export function taskLine(pull: PullRow): string {
+export function taskLine(pull: Pick<PullEntity, 'number' | 'title' | 'author'>): string {
   return (
     `Review pull request #${pull.number} "${pull.title}" by ${pull.author}. ` +
     `Report only the distinct, high-value findings you can defend, each citing an exact ` +

@@ -1,0 +1,84 @@
+{
+  "$comment": "Which review skill runs on which changed files. Globs are repo-relative, forward slashes; `**/` matches zero or more directories, `{a,b}` is alternation. A skill with `contentTrigger` also runs on any file matching `contentInclude` whose current content matches that regex. `model` is passed to the reviewer subagent (`inherit` = the session's model). Every directory under .claude/skills/ must appear either here or in `nonReview` — diff-state.mjs reports the rest as `unrouted`.",
+  "exclude": [
+    "**/pnpm-lock.yaml",
+    "**/package-lock.json",
+    "client/src/vendor/ui/**",
+    "client/src/vendor/shared/**",
+    "**/*.md",
+    ".claude/**",
+    ".github/**"
+  ],
+  "nonReview": ["engineering-insights", "mermaid-diagram", "pr-self-review"],
+  "skills": {
+    "frontend-ui-architecture": {
+      "include": ["client/src/**/*.{ts,tsx}"],
+      "model": "inherit",
+      "chunkSize": 15
+    },
+    "react-best-practices": {
+      "include": ["client/src/**/*.tsx", "client/src/**/use*.ts"],
+      "model": "inherit",
+      "chunkSize": 15
+    },
+    "next-best-practices": {
+      "include": [
+        "client/src/app/**/{page,layout,template,default,loading,error,global-error,not-found,route}.{ts,tsx}",
+        "client/next.config.*",
+        "client/src/middleware.ts"
+      ],
+      "contentInclude": ["client/src/**/*.{ts,tsx}"],
+      "contentTrigger": "['\"]use (client|server)['\"]|from\\s+['\"]next/",
+      "model": "haiku",
+      "chunkSize": 20
+    },
+    "react-testing-library": {
+      "include": ["client/**/*.test.tsx"],
+      "contentInclude": ["client/**/*.test.ts"],
+      "contentTrigger": "@testing-library/",
+      "model": "haiku",
+      "chunkSize": 20
+    },
+    "onion-architecture": {
+      "include": ["server/src/**/*.ts"],
+      "exclude": ["server/src/vendor/shared/**", "server/src/db/migrations/**"],
+      "model": "inherit",
+      "chunkSize": 15
+    },
+    "fastify-best-practices": {
+      "include": ["server/src/**/routes.ts", "server/src/app.ts", "server/src/platform/**"],
+      "model": "haiku",
+      "chunkSize": 20
+    },
+    "drizzle-orm-patterns": {
+      "include": ["server/src/**/repository.ts", "server/src/db/**"],
+      "exclude": ["server/src/db/migrations/**"],
+      "model": "haiku",
+      "chunkSize": 20
+    },
+    "postgresql-table-design": {
+      "include": ["server/src/db/schema.ts", "server/src/db/schema/**", "server/src/db/migrations/*.sql"],
+      "model": "haiku",
+      "chunkSize": 20
+    },
+    "zod": {
+      "include": ["**/vendor/shared/contracts/**"],
+      "contentInclude": ["**/*.{ts,tsx}"],
+      "contentTrigger": "from\\s+['\"]zod['\"]",
+      "model": "haiku",
+      "chunkSize": 20
+    },
+    "typescript-expert": {
+      "include": ["{server,client,reviewer-core,e2e}/**/*.{ts,tsx}"],
+      "exclude": ["server/src/db/migrations/**"],
+      "model": "haiku",
+      "chunkSize": 25
+    },
+    "security": {
+      "include": ["server/src/**", "client/src/**", "reviewer-core/src/**"],
+      "exclude": ["server/src/db/migrations/meta/**"],
+      "model": "inherit",
+      "chunkSize": 15
+    }
+  }
+}

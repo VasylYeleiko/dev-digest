@@ -51,7 +51,7 @@ different models scoring the same findings would otherwise disagree even when
 they agree on every finding, because raw LLM-reported scores have no shared
 anchor and drift wildly between providers. Grounding + deterministic scoring
 together guarantee the score on screen can never contradict the findings
-listed beneath it — see `reviewer-core/CLAUDE.md`'s Do-not-touch on
+listed beneath it — see `reviewer-core/AGENTS.md`'s Do-not-touch on
 `SEVERITY_PENALTY`.
 
 ## What "never trust the model's self-reported score" costs

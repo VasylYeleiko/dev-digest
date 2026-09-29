@@ -38,10 +38,15 @@ export function buildLineIndex(diff: UnifiedDiff): Map<string, Set<number>> {
   return idx;
 }
 
+/**
+ * Walk the diff's line set, never the finding's range: `start_line`/`end_line`
+ * come from the model, and a reply like `end_line: 2e9` must not turn into
+ * billions of iterations. Cost is bounded by the hunk size instead.
+ */
 function rangeIntersects(lines: Set<number>, start: number, end: number): boolean {
   const lo = Math.min(start, end);
   const hi = Math.max(start, end);
-  for (let n = lo; n <= hi; n++) if (lines.has(n)) return true;
+  for (const n of lines) if (n >= lo && n <= hi) return true;
   return false;
 }
 

@@ -15,12 +15,16 @@ on:
       - 'client/**'
       - 'server/**'
       - 'e2e/**'
+      - 'reviewer-core/**' # the API boots on its raw source
+      - 'docker-compose.yml' # Postgres for the run comes from here
       - '.github/workflows/e2e-web.yml'
   pull_request:
     paths:
       - 'client/**'
       - 'server/**'
       - 'e2e/**'
+      - 'reviewer-core/**' # the API boots on its raw source
+      - 'docker-compose.yml' # Postgres for the run comes from here
       - '.github/workflows/e2e-web.yml'
 
 permissions:
@@ -117,6 +121,7 @@ jobs:
         working-directory: e2e
         run: |
           npm ci
+          npm run typecheck
           npm test
 
       - name: Upload failure artifacts

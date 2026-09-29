@@ -209,3 +209,49 @@ describe("FindingsPanel severity pills + filter (one merged, clickable row)", ()
     expect(["f1", "f2"]).toContain(call.findingId);
   });
 });
+
+describe("FindingsPanel — keyboard shortcuts with several panels open", () => {
+  // Two expanded review runs → two panels on one page (ReviewRunAccordion).
+  function renderTwo() {
+    return renderWithIntl(
+      <>
+        <div data-testid="run-a">
+          <FindingsPanel findings={FINDINGS} prId="pr1" />
+        </div>
+        <div data-testid="run-b">
+          <FindingsPanel findings={FINDINGS.map((f) => ({ ...f, id: `b-${f.id}` }))} prId="pr1" />
+        </div>
+      </>,
+    );
+  }
+
+  it("one keypress acts in ONE panel, not in every open panel", () => {
+    renderTwo();
+    fireEvent.keyDown(window, { key: "a" });
+    expect(mutate).toHaveBeenCalledTimes(1);
+    expect((mutate.mock.calls[0]![0] as { findingId: string }).findingId).toBe("f1");
+  });
+
+  it("clicking inside another panel moves the shortcuts there", () => {
+    renderTwo();
+    fireEvent.pointerDown(within(screen.getByTestId("run-b")).getAllByRole("button")[0]!);
+    fireEvent.keyDown(window, { key: "d" });
+    expect(mutate).toHaveBeenCalledTimes(1);
+    const call = mutate.mock.calls[0]![0] as { findingId: string; action: string };
+    expect(call.findingId).toBe("b-f1");
+    expect(call.action).toBe("dismiss");
+  });
+
+  // (contentEditable is covered by the shared `isTextInput`; jsdom doesn't
+  // implement `isContentEditable`, so it can't be exercised here.)
+  it("ignores Ctrl/Cmd combos and typing in a text field", () => {
+    renderWithIntl(<FindingsPanel findings={FINDINGS} prId="pr1" />);
+    fireEvent.keyDown(window, { key: "a", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "d", metaKey: true });
+    const field = document.createElement("textarea");
+    document.body.appendChild(field);
+    fireEvent.keyDown(field, { key: "a" });
+    field.remove();
+    expect(mutate).not.toHaveBeenCalled();
+  });
+});

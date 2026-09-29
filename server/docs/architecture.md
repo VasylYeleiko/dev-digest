@@ -1,52 +1,99 @@
-# Architecture — DI container and adapter ports
+# Architecture — onion rings, ports and composition
 
-How this package wires external dependencies so route handlers never talk to
-a concrete SDK, and how a test swaps any of them for a mock without touching
-route code. For the request lifecycle of one feature end to end, see
-[../specs/review-flow.md](../specs/review-flow.md).
+How this package keeps business rules independent of Postgres, Fastify and
+vendor SDKs, and how a test swaps any of them for a mock without touching a
+service. The rules themselves (what each ring may import, where each kind of
+code goes) live in the `onion-architecture` skill
+([../../.claude/skills/onion-architecture/SKILL.md](../../.claude/skills/onion-architecture/SKILL.md));
+this page maps them onto the code. For the request lifecycle of one feature
+end to end, see [../specs/review-flow.md](../specs/review-flow.md).
 
-## Composition root: `src/app.ts` → `Container`
+## The rings in this package
 
-`buildApp()` (`src/app.ts`) is the single composition root. It builds a
-`Container` (`src/platform/container.ts`) from config + a `Db` handle, attaches
-it to the Fastify instance as `app.container`, then registers every feature
-module from the static `modules` registry (`src/modules/index.ts`). A route
-handler reaches every adapter, repository, and the DB through
-`container.<thing>` — nothing is imported directly from `src/adapters/*` by a
-route.
+| Ring | Where |
+|---|---|
+| 1 Domain | `modules/<m>/{types,ports,constants,helpers}.ts` + pure files (`pulls/status.ts`, `settings/feature-models.ts`), `modules/<m>/index.ts` (public API), `@devdigest/shared` (contracts + port interfaces), pure `platform/` files |
+| 2 Application | `modules/<m>/service.ts` + use-case files (`reviews/run-executor.ts`, `reviews/diff-loader.ts`, `reviews/findings.ts`, `repo-intel/pipeline/*`) |
+| 3 Infrastructure | `modules/<m>/repository.ts` / `repository/*.repo.ts`, `src/adapters/<name>/`, `src/db/`, `platform/{jobs,sse,config,prompts}.ts` |
+| 4 Presentation + composition | `modules/<m>/routes.ts`, `modules/<m>/compose.ts`, `modules/index.ts`, `app.ts`, `platform/container.ts` |
+
+## Composition root: `app.ts` → `Container` → `compose.ts`
+
+`buildApp()` (`src/app.ts`) builds a `Container` (`src/platform/container.ts`)
+from config + a `Db` handle, attaches it as `app.container`, then registers
+every feature module from the static registry (`src/modules/index.ts`).
 
 ```ts
 export interface BuildAppOptions {
   config?: AppConfig;
   db?: Db;
-  overrides?: ContainerOverrides;   // ← this is the whole test seam
+  overrides?: ContainerOverrides;   // ← the test seam for every adapter
 }
 ```
 
-A test calls `buildApp({ db: testDb, overrides: { llm: { openai: mockProvider } } })`
-and every module that resolves `container.llm('openai')` gets the mock,
-unmodified. `server/src/adapters/mocks.ts` holds the mock implementations used
-across the integration suite.
+The container owns **shared infrastructure only**: config, db, the job queue,
+the run event bus, every adapter, and the one cross-module facade
+(`repoIntel`). It does **not** build module services. Each module's
+`compose.ts` does that — it constructs the module's repository and hands its
+service exactly the ports it needs:
 
-## Adapters are ports, not SDK wrappers spread across the codebase
+```ts
+// modules/repos/compose.ts
+export function createRepoService(c: Container): RepoService {
+  return new RepoService({ repos: createRepoStore(c), jobs: c.jobs, git: c.git, secrets: c.secrets });
+}
+```
 
-Each external dependency has an interface (defined in `@devdigest/shared`'s
-`adapters.ts`, e.g. `LLMProvider`, `GitHubClient`, `GitClient`, `CodeIndex`,
-`Embedder`, `SecretsProvider`, `AuthProvider`) and exactly one concrete
-implementation folder under `src/adapters/<name>/`:
+A route plugin wires once, at registration, and its handlers only call the
+service:
 
-| Port | Concrete adapter | Notes |
+```ts
+const ctx = requestContext(app.container.auth);
+const service = createRepoService(app.container);
+app.get('/repos', async (req) => service.list((await ctx(req)).workspaceId));
+```
+
+Services never import `Container`; they receive a `Deps` object of
+interfaces. Lazily-built clients arrive as resolvers
+(`GitHubClientResolver`, `LLMProviderResolver`) because they depend on a
+secret that can change at runtime.
+
+A test either goes through the whole app —
+`buildApp({ db: testDb, overrides: { llm: { openai: mockProvider } } })` — or
+constructs a service directly with in-memory fakes of its ports
+(`test/repo-intel-resync.test.ts`, `test/agents-versions.it.test.ts`).
+`server/src/adapters/mocks.ts` holds the mock adapters.
+
+## Ports: where each interface lives
+
+- **External systems and platform services** → `@devdigest/shared`'s
+  `adapters.ts` (edit `src/vendor/shared/adapters.ts`; `reviewer-core`
+  compiles against the same file). The client copy of the package carries no
+  ports.
+- **A module's persistence** → that module's `ports.ts` (`RepoStore`,
+  `PullStore`, `AgentStore`, `ReviewStore`, `SettingsStore`,
+  `RepoIntelStore`), implemented by its `repository.ts`.
+- **What one module needs from another** → declared by the consumer
+  (`reviews/ports.ts`'s `PrFilesRefresher`), satisfied in `compose.ts`
+  (`PullService` is passed in).
+
+| Port (`@devdigest/shared`) | Concrete implementation | Notes |
 |---|---|---|
-| `LLMProvider` | `adapters/llm/openai.ts`, `adapters/llm/anthropic.ts`; OpenRouter comes from `@devdigest/reviewer-core` (shared with the CI runner) | Resolved lazily by id, cached in `llmCache`; secrets are re-read only on cache miss |
+| `LLMProvider` | `adapters/llm/openai.ts`, `adapters/llm/anthropic.ts`; OpenRouter from `@devdigest/reviewer-core` | Resolved lazily by id, cached in `llmCache`; secrets are re-read only on cache miss |
 | `GitHubClient` | `adapters/github/octokit.ts` | Async getter — constructing it needs an awaited secret read |
 | `GitClient` | `adapters/git/simple-git.ts` | Sync getter, memoized |
-| `CodeIndex` | `adapters/codeindex/ripgrep.ts` | Depends on `container.git` — adapters can depend on each other through the container, not by importing one another directly |
-| `Embedder` | `adapters/embedder/openai.ts` | Throws `ConfigError` **before** constructing anything when `EMBEDDINGS_ENABLED=false` — the zero-OpenAI-calls guarantee lives here, not in a caller |
+| `CodeIndex` | `adapters/codeindex/ripgrep.ts` | Depends on `container.git` — adapters depend on each other through the container |
+| `CodeParser` | `adapters/astgrep/index.ts` (`AstGrepCodeParser`) | ast-grep + the regex endpoint/cron extractors; repo-intel only |
+| `SourceFiles` | `adapters/fs/local-source-files.ts` | Reads/walks a local clone; repo-intel only |
+| `DepGraph`, `Tokenizer` | `adapters/depgraph/`, `adapters/tokenizer/` | repo-intel indexer only |
+| `Embedder` | `adapters/embedder/openai.ts` | Throws `ConfigError` **before** constructing anything when `EMBEDDINGS_ENABLED=false` |
 | `SecretsProvider` | `adapters/secrets/local.ts` | Backs every other adapter's key lookup |
 | `AuthProvider` | `adapters/auth/local.ts` | Single-workspace, no-op auth for the course starter |
-| `DepGraph`, `Tokenizer` | `adapters/depgraph/`, `adapters/tokenizer/` | repo-intel-only; only the indexer pipeline reads these |
+| `JobQueue` | `platform/jobs.ts` (`JobRunner`) | p-queue + the `jobs` table |
+| `RunEventBus` | `platform/sse.ts` (`RunBus`) | In-memory run log; the SSE route drains it through `ReviewService.events` |
+| `Logger` | Fastify's pino instance (`app.log`) | Passed into `compose.ts` by the route plugin |
 
-The container getter pattern is consistent across all of them:
+The container getter pattern is consistent across all adapters:
 
 ```ts
 get git(): GitClient {
@@ -56,20 +103,19 @@ get git(): GitClient {
 }
 ```
 
-Adding a new external dependency means adding an interface to
-`adapters.ts`, one concrete class under `src/adapters/<name>/`, one field +
-getter on `Container`, and one optional key on `ContainerOverrides` — never a
-new ad hoc import inside a route or service.
+Adding a new external dependency means: an interface in `adapters.ts`, one
+concrete class under `src/adapters/<name>/`, one field + getter on
+`Container`, one optional key on `ContainerOverrides`, and passing it into
+the consuming service's `Deps` from that module's `compose.ts`.
 
-## Shared repositories live in the container too
+## Modules meet through `index.ts`
 
-`AgentsRepository` and `ReviewRepository` are constructed once in the
-container (`container.agentsRepo`, `container.reviewRepo`) rather than inside
-the `agents`/`reviews` modules, specifically so a *different* module can read
-agent or review data without reaching into another module's folder — e.g.
-`pulls/routes.ts`'s list rollups query `t.reviews`/`t.agentRuns` directly (see
-[review-flow.md](../specs/review-flow.md)) rather than importing from
-`modules/reviews/`.
+Each module that others depend on exposes a public `index.ts` (types, ports,
+constants — ring 1, no `Container`). Application code imports another module
+only from there; composition code imports another module's `compose.ts`. A
+repository may still **read** another module's tables for a read model — the
+PR list's SCORE/FINDINGS/COST rollups are `PullRepository` queries over
+`reviews`/`findings`/`agent_runs` (see [review-flow.md](../specs/review-flow.md)).
 
 ## Pricing is a container-level concern, not an LLM-adapter concern
 

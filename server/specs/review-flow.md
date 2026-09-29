@@ -5,7 +5,7 @@ everywhere it should be." For the DI/adapter shape that makes this
 mockable, see [../docs/architecture.md](../docs/architecture.md). For the
 run-cost half specifically, see [0001-run-cost.md](0001-run-cost.md).
 
-## 1. Import (`pulls` module)
+## 1. Import (`pulls` module, `PullService.listForRepo`)
 
 `GET /repos/:id/pulls` is also the sync point: when a GitHub token is
 configured it fetches the repo's pull requests and upserts them
@@ -17,8 +17,10 @@ they're backfilled from the detail endpoint, capped at 10 PRs per request.
 
 ## 2. Trigger (`POST /pulls/:id/review`)
 
-Body is `{ agentId }` (one agent) or `{ all: true }` (every enabled agent) —
-`ReviewService.resolveTargets` turns that into a list of `AgentRow`. The route
+Body is `{ agentId }` (one agent), `{ agentIds: [...] }` (a hand-picked
+subset) or `{ all: true }` (every enabled agent); an empty body is accepted
+by the route schema and rejected by the service with `400 invalid_run_request`.
+`ReviewService.resolveTargets` turns it into a list of `AgentEntity`. The route
 is **fire-and-forget**: it creates a `running` `agent_runs` row per target
 agent, returns `{ pr_id, runs, reviews: [] }` immediately with the run ids,
 and kicks off `ReviewRunExecutor.executeRuns(...)` un-awaited
@@ -39,13 +41,13 @@ failure at this stage fails every queued run with `status: 'failed'`,
 
 Per agent, `runOneAgent`:
 
-1. Resolves the agent's `LLMProvider` via `container.llm(agent.provider)` —
+1. Resolves the agent's `LLMProvider` via the injected `LLMProviderResolver` —
    a missing API key throws `ConfigError`, caught and persisted as a failed
    run, not a 500.
 2. Builds repo-intel context (callers digest, repo-map skeleton, rank note) —
    all best-effort; when the agent has repo-intel off, or the facade can't
    answer, the prompt degrades to the pre-repo-intel shape rather than
-   erroring (see `server/CLAUDE.md`'s Gotchas on `REPO_INTEL_ENABLED`).
+   erroring (see `server/AGENTS.md`'s Gotchas on `REPO_INTEL_ENABLED`).
 3. Calls `reviewPullRequest(...)` — the **entire** pure pipeline
    (assemble → LLM → structured parse → grounding) lives in
    `@devdigest/reviewer-core`; this module supplies only I/O (context
@@ -53,7 +55,7 @@ Per agent, `runOneAgent`:
    [reviewer-core/specs/grounding.md](../../reviewer-core/specs/grounding.md)
    for what happens inside that call.
 4. Persists, in order: the review row (`insertReview`), its grounded findings
-   (`insertFindings`), the PR's `lastReviewedSha` (`markReviewed` — this is
+   (`insertFindings`), the PR's `lastReviewedSha` (`PullStore.markReviewed` — this is
    what `deriveReviewStatus` reads to decide needs_review/reviewed/stale on
    the list), then completes the `agent_runs` row (`completeAgentRun`) with
    `status: 'done'`, token counts, `costUsd` (read off the engine outcome,
@@ -68,12 +70,13 @@ isolated: it's caught, logged, and does not stop the remaining queued agents.
 ## 4. What the PR-list row reads back
 
 `GET /repos/:id/pulls` never re-runs anything — it's three on-read rollups
-over already-persisted rows, all in `pulls/routes.ts`, all the same shape (one
-`inArray` query + JS grouping in `modules/pulls/status.ts`'s pure helpers):
+over already-persisted rows, orchestrated by `PullService.listForRepo`, all the
+same shape (one `inArray` query in `PullRepository` + JS grouping in the pure
+helpers of `modules/pulls/helpers.ts` / `status.ts`):
 
 | List field | Source | Helper |
 |---|---|---|
-| `score` | the PR's newest `reviews` row (`kind='review'`) | inline in the route |
+| `score` | the PR's newest `reviews` row (`kind='review'`) | `latestReviewByPr` |
 | `findings`, `findings_preview` | `findings` rows of that same newest review | `rollupSeverities`, `previewFindings` |
 | `cost_usd` | **every** `status='done'` `agent_runs` row for the PR, summed all-time | `rollupCostByPr` |
 

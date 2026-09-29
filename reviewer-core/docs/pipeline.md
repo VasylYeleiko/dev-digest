@@ -34,7 +34,7 @@ assemblePrompt (prompt.ts)
    wrapped with `wrapUntrusted` and omitted entirely (not empty-rendered)
    when the caller doesn't supply it. The server's starter config only ever
    passes diff + system prompt + repo map; later course lessons feed the
-   rest. See `reviewer-core/CLAUDE.md`'s Gotchas for why `INJECTION_GUARD`
+   rest. See `reviewer-core/AGENTS.md`'s Gotchas for why `INJECTION_GUARD`
    here must never become a keyword denylist.
 2. **Single-pass vs map-reduce** (`selectMode` in `run.ts`) — `'auto'` (the
    default) picks map-reduce only when the diff is **both** larger than

@@ -22,6 +22,7 @@ import { readdirSync, readFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
+  parseFlow,
   resolveArgs,
   stdoutContains,
   summarize,
@@ -56,7 +57,7 @@ function loadFlows(): { file: string; flow: Flow }[] {
     .sort()
     .map((file) => ({
       file,
-      flow: JSON.parse(readFileSync(join(SPECS_DIR, file), "utf8")) as Flow,
+      flow: parseFlow(JSON.parse(readFileSync(join(SPECS_DIR, file), "utf8")), file),
     }));
 }
 

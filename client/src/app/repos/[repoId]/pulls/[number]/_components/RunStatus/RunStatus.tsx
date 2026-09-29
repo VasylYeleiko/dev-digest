@@ -5,6 +5,7 @@
 import React from "react";
 import { useTranslations } from "next-intl";
 import { LiveLogStream, type LogLine } from "@devdigest/ui";
+import { eventsToLog } from "../../run-log";
 import { useRunEvents } from "../../../../../../../lib/hooks/reviews";
 import { LOG_HEIGHT } from "./constants";
 import { s } from "./styles";
@@ -27,11 +28,7 @@ export function RunStatus({
 
   if (runIds.length === 0) return null;
 
-  const log: LogLine[] = events.map((e) => ({
-    t: e.t,
-    k: e.kind as LogLine["k"],
-    m: e.msg,
-  }));
+  const log: LogLine[] = eventsToLog(events);
 
   return (
     <div style={s.wrap}>

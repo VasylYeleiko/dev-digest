@@ -1,15 +1,15 @@
 import type { Agent, AgentVersion, CiFailOn, Provider, ReviewStrategy } from '@devdigest/shared';
 import { AgentVersionConfig } from '@devdigest/shared';
-import type { AgentRow, AgentVersionRow } from './repository.js';
+import type { AgentEntity, AgentVersionEntity } from './types.js';
 
 /**
- * Pure helpers for the agents module — DB row ⇄ DTO mapping and the
- * config-version-bump rule. No I/O; behaviour-identical to the previous inline
- * implementations.
+ * Pure helpers for the agents module (ring 1) — entity → DTO mapping and the
+ * config-version-bump rule. No I/O.
  */
 
-/** Map a persisted agent row to the public `Agent` DTO. */
-export function toAgentDto(row: AgentRow): Agent {
+/** Map an agent entity to the public `Agent` DTO. */
+/** `skillCount` (linked skills) is included when the caller looked it up. */
+export function toAgentDto(row: AgentEntity, skillCount?: number): Agent {
   return {
     id: row.id,
     name: row.name,
@@ -23,6 +23,7 @@ export function toAgentDto(row: AgentRow): Agent {
     strategy: row.strategy as ReviewStrategy,
     ci_fail_on: row.ciFailOn as CiFailOn,
     repo_intel: row.repoIntel,
+    ...(skillCount !== undefined ? { skill_count: skillCount } : {}),
   };
 }
 
@@ -32,7 +33,7 @@ export function toAgentDto(row: AgentRow): Agent {
  * could drift), so it is parsed through `AgentVersionConfig` — a malformed
  * snapshot throws here rather than leaking an unvalidated blob to the client.
  */
-export function toAgentVersionDto(row: AgentVersionRow): AgentVersion {
+export function toAgentVersionDto(row: AgentVersionEntity): AgentVersion {
   return {
     agent_id: row.agentId,
     version: row.version,
@@ -60,7 +61,7 @@ export interface ConfigChangePatch {
  */
 export function isConfigChange(
   existing: Pick<
-    AgentRow,
+    AgentEntity,
     | 'name'
     | 'description'
     | 'provider'

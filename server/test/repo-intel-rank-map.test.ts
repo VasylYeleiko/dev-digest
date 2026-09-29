@@ -6,9 +6,10 @@
 import { describe, it, expect } from 'vitest';
 import { computeFileRank } from '../src/modules/repo-intel/pipeline/rank.js';
 import { renderRepoMap, REPO_MAP_HEADER } from '../src/modules/repo-intel/pipeline/repo-map.js';
-import { approxTokens, TiktokenTokenizer } from '../src/adapters/tokenizer/index.js';
-import type { Tokenizer } from '../src/adapters/tokenizer/index.js';
-import type { RepoMapCandidateRow } from '../src/modules/repo-intel/repository.js';
+import { TiktokenTokenizer } from '../src/adapters/tokenizer/index.js';
+import { approxTokens } from '../src/platform/tokens.js';
+import type { Tokenizer } from '@devdigest/shared';
+import type { RepoMapCandidateRow } from '../src/modules/repo-intel/ports.js';
 
 /** Deterministic char-count tokenizer so budgets are exact in tests. */
 const charTokenizer: Tokenizer = { count: (t) => t.length };

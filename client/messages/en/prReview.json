@@ -119,5 +119,29 @@
     "goToReview": "Jump to this run’s findings below",
     "openTrace": "Open run trace & logs",
     "deleteRun": "Delete run"
+  },
+  "accordion": {
+    "agentFallback": "Agent",
+    "findingsCount": "{count, plural, one {# finding} other {# findings}}",
+    "blockersSuffix": " · {count, plural, one {# blocker} other {# blockers}}",
+    "deleteTitle": "Delete this review run",
+    "deleteConfirm": "Delete this \"{agent}\" review run and its findings?",
+    "agentLower": "agent"
+  },
+  "findingsTab": {
+    "cancel": "Cancel",
+    "openTrace": "Open run trace",
+    "liveReview": "Live review",
+    "inProgress": "Review in progress…",
+    "inProgressSub": "the agent is analyzing the diff — this can take a while on large PRs.",
+    "trifectaTitle": "Lethal Trifecta detected",
+    "trifectaCount": "{count} finding(s)",
+    "timeline": "Timeline",
+    "timelineHint": "runs & commits · newest first",
+    "reviewRuns": "Review runs",
+    "reviewRunsHint": "grouped by run · newest first",
+    "emptyTitle": "No findings yet",
+    "emptyBody": "Run a review to generate findings. Use Run Review ▾ above (run all enabled agents or a specific one).",
+    "deleteRunConfirm": "Delete this run from history? (its logs are removed too)"
   }
 }

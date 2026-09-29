@@ -6,22 +6,20 @@
 "use client";
 
 import React from "react";
+import { useTranslations } from "next-intl";
 import { Icon, Badge } from "@devdigest/ui";
 import type { ReviewRecord, RunSummary, Verdict } from "@devdigest/shared";
 import { FindingsPanel } from "../FindingsPanel";
 import { VerdictBanner } from "../VerdictBanner";
 import { useDeleteReview } from "../../../../../../../lib/hooks/reviews";
+import { formatWhen } from "../../../../../../../lib/dates";
+import { openBlockers } from "./helpers";
 
 const VERDICT_COLOR: Record<string, string> = {
   request_changes: "var(--crit)",
   comment: "var(--warn)",
   approve: "var(--ok)",
 };
-
-function formatWhen(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
-}
 
 export function ReviewRunAccordion({
   review,
@@ -55,9 +53,10 @@ export function ReviewRunAccordion({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetRunId, targetNonce, review.run_id]);
+  const t = useTranslations("prReview");
   const del = useDeleteReview(prId);
   const findings = review.findings;
-  const blockers = findings.filter((f) => f.severity === "CRITICAL" && !f.dismissed_at).length;
+  const blockers = openBlockers(findings);
   const verdictColor = review.verdict ? VERDICT_COLOR[review.verdict] ?? "var(--text-muted)" : "var(--text-muted)";
 
   return (
@@ -91,15 +90,15 @@ export function ReviewRunAccordion({
         }}
       >
         <Icon.Cpu size={15} style={{ color: "var(--text-muted)" }} />
-        <span style={{ fontWeight: 600, fontSize: 14 }}>{review.agent_name ?? "Agent"}</span>
+        <span style={{ fontWeight: 600, fontSize: 14 }}>{review.agent_name ?? t("accordion.agentFallback")}</span>
         {review.verdict && (
           <Badge color={verdictColor} bg="transparent">
             {review.verdict.replace("_", " ")}
           </Badge>
         )}
         <span style={{ fontSize: 12.5, color: "var(--text-muted)" }}>
-          {findings.length} finding{findings.length === 1 ? "" : "s"}
-          {blockers > 0 ? ` · ${blockers} blocker${blockers === 1 ? "" : "s"}` : ""}
+          {t("accordion.findingsCount", { count: findings.length })}
+          {blockers > 0 ? t("accordion.blockersSuffix", { count: blockers }) : ""}
         </span>
         <span style={{ flex: 1 }} />
         {review.score != null && (
@@ -113,13 +112,13 @@ export function ReviewRunAccordion({
         <button
           onClick={(e) => {
             e.stopPropagation();
-            if (window.confirm(`Delete this "${review.agent_name ?? "agent"}" review run and its findings?`)) {
+            if (window.confirm(t("accordion.deleteConfirm", { agent: review.agent_name ?? t("accordion.agentLower") }))) {
               del.mutate(review.id);
             }
           }}
           disabled={del.isPending}
-          title="Delete this review run"
-          aria-label="Delete this review run"
+          title={t("accordion.deleteTitle")}
+          aria-label={t("accordion.deleteTitle")}
           style={{
             background: "none",
             border: "none",

@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import type { RunEvent, RunEventKind } from '@devdigest/shared';
+import type { RunEvent, RunEventBus, RunEventKind } from '@devdigest/shared';
 
 /**
  * SSE / run-log bus.
@@ -16,7 +16,14 @@ function clockTime(): string {
   return new Date().toTimeString().slice(0, 8);
 }
 
-export class RunBus {
+/**
+ * How long a completed run's replay buffer stays in memory for late SSE
+ * subscribers. After that the persisted `run_traces` document is the record;
+ * without eviction every run's full log would live for the process lifetime.
+ */
+const COMPLETED_BUFFER_TTL_MS = 10 * 60 * 1000;
+
+export class RunBus implements RunEventBus {
   private emitters = new Map<string, EventEmitter>();
   private buffers = new Map<string, RunEvent[]>();
   private seq = new Map<string, number>();
@@ -54,7 +61,13 @@ export class RunBus {
     const next = (this.seq.get(runId) ?? 0) + 1;
     this.seq.set(runId, next);
     const event: RunEvent = { runId, seq: next, kind, msg, t: clockTime(), data };
-    this.buffers.get(runId)!.push(event);
+    let buf = this.buffers.get(runId);
+    if (!buf) {
+      // Evicted while its runner was still publishing (e.g. after a cancel).
+      buf = [];
+      this.buffers.set(runId, buf);
+    }
+    buf.push(event);
     e.emit('event', event);
     return event;
   }
@@ -80,11 +93,34 @@ export class RunBus {
     e?.emit('done');
     // Keep the buffer briefly available for late subscribers; clear emitter.
     this.emitters.delete(runId);
+    setTimeout(() => this.evict(runId), COMPLETED_BUFFER_TTL_MS).unref();
+  }
+
+  /**
+   * Drop a completed run's replay state. A run someone is still listening to
+   * (a cancelled run whose runner keeps publishing until its next checkpoint)
+   * is re-checked after another TTL instead.
+   */
+  private evict(runId: string): void {
+    const e = this.emitters.get(runId);
+    if (e && e.listenerCount('event') + e.listenerCount('done') > 0) {
+      setTimeout(() => this.evict(runId), COMPLETED_BUFFER_TTL_MS).unref();
+      return;
+    }
+    this.emitters.delete(runId);
+    this.buffers.delete(runId);
+    this.seq.delete(runId);
+    this.completed.delete(runId);
   }
 
   /** Whether a run has already completed (for replay-then-end late subscribers). */
   isComplete(runId: string): boolean {
     return this.completed.has(runId);
+  }
+
+  /** Whether this process holds any state for the run (live or recently completed). */
+  knows(runId: string): boolean {
+    return this.buffers.has(runId) || this.completed.has(runId);
   }
 
   onDone(runId: string, listener: () => void): () => void {

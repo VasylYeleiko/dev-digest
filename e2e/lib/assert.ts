@@ -21,6 +21,37 @@ export interface Flow {
   steps: Step[];
 }
 
+/**
+ * Validate a parsed `*.flow.json` against the Flow shape. A malformed spec
+ * (typo'd key, `cmd` as a string) used to surface mid-run as an obscure
+ * agent-browser failure; this fails at load time, naming the file and step.
+ */
+export function parseFlow(raw: unknown, file: string): Flow {
+  const fail = (msg: string): never => {
+    throw new Error(`${file}: ${msg}`);
+  };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) fail("expected a JSON object");
+  const o = raw as Record<string, unknown>;
+  if (typeof o.name !== "string" || !o.name) fail('"name" must be a non-empty string');
+  if (o.description !== undefined && typeof o.description !== "string") fail('"description" must be a string');
+  if (!Array.isArray(o.steps) || o.steps.length === 0) fail('"steps" must be a non-empty array');
+  (o.steps as unknown[]).forEach((s, i) => {
+    const at = `step ${i + 1}`;
+    if (!s || typeof s !== "object") fail(`${at}: expected an object`);
+    const step = s as Record<string, unknown>;
+    const cmd = step.cmd;
+    if (!Array.isArray(cmd) || cmd.length === 0 || !cmd.every((a) => typeof a === "string"))
+      fail(`${at}: "cmd" must be a non-empty array of strings`);
+    if (step.label !== undefined && typeof step.label !== "string") fail(`${at}: "label" must be a string`);
+    if (step.assert !== undefined) {
+      const a = step.assert as Record<string, unknown> | null;
+      if (!a || typeof a !== "object" || (a.stdoutIncludes !== undefined && typeof a.stdoutIncludes !== "string"))
+        fail(`${at}: "assert.stdoutIncludes" must be a string`);
+    }
+  });
+  return raw as Flow;
+}
+
 export interface StepResult {
   label: string;
   ok: boolean;

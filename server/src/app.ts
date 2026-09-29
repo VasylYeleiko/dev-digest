@@ -16,7 +16,7 @@ import { createDb, type Db } from './db/client.js';
 import { Container, type ContainerOverrides } from './platform/container.js';
 import { AppError } from './platform/errors.js';
 import { modules } from './modules/index.js';
-import { ReviewService } from './modules/reviews/service.js';
+import { createReviewService } from './modules/reviews/compose.js';
 
 // Attach the DI container to every request/instance.
 declare module 'fastify' {
@@ -78,7 +78,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   // NOTE: assumes a SINGLE API instance per DB. With multiple replicas this
   // would need per-instance scoping / heartbeats (not this app's deployment).
   try {
-    const reaped = await new ReviewService(container).reapStaleRuns();
+    const reaped = await createReviewService(container, app.log).reapStaleRuns();
     if (reaped > 0) app.log.info({ reaped }, 'reaped stale running agent_runs on boot');
   } catch (err) {
     app.log.warn({ err: (err as Error).message }, 'stale-run reaping failed (non-fatal)');
@@ -157,9 +157,17 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
       return;
     }
     app.log.error(err);
+    // Framework 4xx errors (bad JSON, 413 body limit, 429 rate limit) carry a
+    // safe, client-facing message. Anything else is an unexpected failure whose
+    // message may expose internals (raw SQL errors, file paths) — keep it in the log.
     const e = err as { statusCode?: number; message?: string };
-    reply.status(e.statusCode ?? 500).send({
-      error: { code: 'internal_error', message: e.message ?? 'Internal error' },
+    const status = e.statusCode ?? 500;
+    const clientError = status >= 400 && status < 500;
+    reply.status(status).send({
+      error: {
+        code: 'internal_error',
+        message: clientError ? (e.message ?? 'Bad request') : 'Internal error',
+      },
     });
   });
 

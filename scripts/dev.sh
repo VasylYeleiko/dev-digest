@@ -66,9 +66,15 @@ done
 [ "${status:-}" = "healthy" ] || { echo "Postgres did not become healthy in time"; exit 1; }
 log "Postgres healthy"
 
-# --- install deps (only if missing) ------------------------------------------
+# --- install deps (if missing, or the lockfile changed since the last install) --
+# $1 = package dir, $2 = lockfile, $3 = the marker the package manager writes on
+# install. A pull that bumps a dependency makes the lockfile newer than the
+# marker, so the stale node_modules gets refreshed instead of failing at boot.
+deps_stale() {
+  [ ! -d "$1/node_modules" ] || [ ! -f "$1/node_modules/$3" ] || [ "$1/$2" -nt "$1/node_modules/$3" ]
+}
 install_if_needed() {
-  if [ ! -d "$1/node_modules" ]; then
+  if deps_stale "$1" pnpm-lock.yaml .modules.yaml; then
     log "installing deps in $1"
     (cd "$1" && pnpm install)
   fi
@@ -77,7 +83,10 @@ install_if_needed server
 [ "$DB_ONLY" -eq 0 ] && [ "$RUN_CLIENT" -eq 1 ] && install_if_needed client
 # reviewer-core's RAW source is imported by the API at runtime (tsconfig alias);
 # without its deps the API crashes at boot with ERR_MODULE_NOT_FOUND. It uses npm.
-[ -d reviewer-core/node_modules ] || { log "installing deps in reviewer-core"; (cd reviewer-core && npm ci); }
+if deps_stale reviewer-core package-lock.json .package-lock.json; then
+  log "installing deps in reviewer-core"
+  (cd reviewer-core && npm ci)
+fi
 
 # --- migrate + seed ----------------------------------------------------------
 log "applying migrations"

@@ -11,8 +11,9 @@ import { Button, Drawer, LiveLogStream, Tabs, type LogLine } from "@devdigest/ui
 import type { FindingRecord } from "@devdigest/shared";
 import { useRunTrace } from "@/lib/hooks/trace";
 import { useRunEvents } from "@/lib/hooks/reviews";
-import { DRAWER_WIDTH, LOG_HEIGHT, TABS } from "./constants";
-import { eventsToLog, traceLog } from "./helpers";
+import { COPIED_FEEDBACK_MS, DRAWER_WIDTH, LOG_HEIGHT, TABS } from "./constants";
+import { traceLog } from "./helpers";
+import { eventsToLog } from "../../run-log";
 import { s } from "./styles";
 import { TraceBody } from "./_components/TraceBody";
 
@@ -51,11 +52,16 @@ export default function RunTraceDrawer({
   // Copy the model's raw output to the clipboard (footer button), with a brief
   // visual confirmation. Disabled until the trace (and its raw output) loads.
   const [rawCopied, setRawCopied] = React.useState(false);
+  const copiedTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  React.useEffect(() => () => {
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+  }, []);
   const copyRaw = () => {
     if (!trace?.raw_output) return;
     void navigator.clipboard?.writeText(trace.raw_output);
     setRawCopied(true);
-    setTimeout(() => setRawCopied(false), 1500);
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    copiedTimer.current = setTimeout(() => setRawCopied(false), COPIED_FEEDBACK_MS);
   };
 
   const log: LogLine[] = eventsToLog(events);
